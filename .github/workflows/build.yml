@@ -37,13 +37,17 @@ jobs:
         run: npx cap sync
       
       - name: 构建 APK
-        run: |
-          cd android
-          chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon
-      
-      - name: 上传 APK
+        uses: nizarmah/action-webview-android@v1
+        with:
+          app_name: 线条音乐盒
+          package_name: com.music.player
+          source: ./
+          
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: MusicPlayer-App
-          path: android/app/build/outputs/apk/debug/*.apk
+          path: app-debug.apk
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
