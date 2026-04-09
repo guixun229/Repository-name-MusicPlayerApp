@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>线条音乐盒 · 极简播放器</title>
     <style>
-        * { 
+        * {
             margin: 0;
             padding: 0;
             box-sizing: border-box;
@@ -856,4 +856,4 @@
                     actionsDiv.appendChild(renameBtn); actionsDiv.appendChild(categoryBtn); actionsDiv.appendChild(deleteBtn);
                     itemDiv.appendChild(infoDiv); itemDiv.appendChild(actionsDiv);
                     let startX = 0;
-                    itemDiv.addEventListener('touchstart', (e) => {
+                    itemDiv.addEventListener('touchstart', (e) => { 
