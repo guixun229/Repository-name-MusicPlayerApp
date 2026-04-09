@@ -8,40 +8,51 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
-      
-      - name: 设置 Java
+
+      - name: 设置 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: 设置 Java 17（强制覆盖所有环境）
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '17'
-      
+          java-package: jdk
+          architecture: x64
+
+      - name: 验证Java版本（确保是17）
+        run: |
+          java -version
+          javac -version
+          echo $JAVA_HOME
+
       - name: 设置 Android SDK
         uses: android-actions/setup-android@v3
-      
-      - name: 安装 Capacitor
+
+      - name: 安装依赖
+        run: npm install
+
+      - name: 确保 www/index.html 存在
         run: |
-          npm install -g @capacitor/cli
-          npm install @capacitor/core @capacitor/android
-      
-      - name: 初始化 Capacitor
-        run: npx cap init 线条音乐盒 com.music.player --web-dir=www
-      
-      - name: 添加 Android 平台
-        run: npx cap add android
-      
-      - name: 同步文件
-        run: npx cap sync
-      
-      - name: 构建 APK
+          mkdir -p www
+          echo '<!DOCTYPE html><html><body><h1>线条音乐盒</h1></body></html>' > www/index.html
+
+      - name: 同步资源到安卓
+        run: npx cap sync android
+
+      - name: 清理并构建 APK（强制指定Java 17）
         run: |
           cd android
           chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon
-      
+          ./gradlew clean assembleDebug --no-daemon -Dorg.gradle.java.home=$JAVA_HOME
+
       - name: 上传 APK
         uses: actions/upload-artifact@v4
         with:
