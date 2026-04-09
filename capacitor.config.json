@@ -1,6 +1,6 @@
 {
   "appId": "com.music.player",
-  "appName": "线条音乐盒",
+  "appName": "旋律",
   "webDir": "www",
   "bundledWebRuntime": false
 }
