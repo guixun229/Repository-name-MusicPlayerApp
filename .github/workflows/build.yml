@@ -13,39 +13,34 @@ jobs:
       - name: 检出代码
         uses: actions/checkout@v4
       
-      - name: 设置 Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-      
-      - name: 设置 Java 17
+      - name: 设置 Java
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
-          java-version: '17'
+          java-version: '21'
       
       - name: 设置 Android SDK
         uses: android-actions/setup-android@v3
-
-      # 强制保证 www/index.html 一定存在
-      - name: 创建网页入口
+      
+      - name: 安装 Capacitor
         run: |
-          mkdir -p www
-          echo '<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>音乐播放器</body></html>' > www/index.html
+          npm install -g @capacitor/cli
+          npm install @capacitor/core @capacitor/android
       
-      - name: 安装依赖
-        run: npm install
+      - name: 初始化 Capacitor
+        run: npx cap init 线条音乐盒 com.music.player --web-dir=www
       
-      # 只同步，不重新初始化、不重新添加平台
-      - name: 同步 Capacitor
+      - name: 添加 Android 平台
+        run: npx cap add android
+      
+      - name: 同步文件
         run: npx cap sync
       
       - name: 构建 APK
         run: |
           cd android
           chmod +x gradlew
-          ./gradlew clean
-          ./gradlew assembleDebug
+          ./gradlew assembleDebug --no-daemon
       
       - name: 上传 APK
         uses: actions/upload-artifact@v4
