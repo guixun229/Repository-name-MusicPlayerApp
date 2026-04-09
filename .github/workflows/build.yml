@@ -22,17 +22,13 @@ jobs:
       - name: 设置 Android SDK
         uses: android-actions/setup-android@v3
       
-      - name: 创建 Android 项目
+      - name: 创建 Android 项目结构
         run: |
-          # 创建目录结构
+          # 创建目录
           mkdir -p app/src/main/assets
           mkdir -p app/src/main/java/com/music/player
           mkdir -p app/src/main/res/values
-          mkdir -p app/src/main/res/mipmap-hdpi
-          mkdir -p app/src/main/res/mipmap-mdpi
-          mkdir -p app/src/main/res/mipmap-xhdpi
-          mkdir -p app/src/main/res/mipmap-xxhdpi
-          mkdir -p app/src/main/res/mipmap-xxxhdpi
+          mkdir -p app/src/main/res/drawable
           
           # 复制网页文件
           cp -r www/* app/src/main/assets/
@@ -45,14 +41,11 @@ jobs:
       
           <uses-permission android:name="android.permission.INTERNET" />
           <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
-          <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
           <uses-permission android:name="android.permission.RECORD_AUDIO" />
-          <uses-permission android:name="android.permission.WAKE_LOCK" />
-          <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-          
+      
           <application
               android:allowBackup="true"
-              android:icon="@mipmap/ic_launcher"
+              android:icon="@drawable/ic_launcher"
               android:label="线条音乐盒"
               android:usesCleartextTraffic="true"
               android:theme="@style/AppTheme">
@@ -82,11 +75,6 @@ jobs:
       import android.webkit.WebChromeClient;
       import android.webkit.WebSettings;
       import androidx.appcompat.app.AppCompatActivity;
-      import android.Manifest;
-      import android.content.pm.PackageManager;
-      import android.os.Build;
-      import androidx.core.app.ActivityCompat;
-      import androidx.core.content.ContextCompat;
       
       public class MainActivity extends AppCompatActivity {
           private WebView webView;
@@ -95,9 +83,6 @@ jobs:
           protected void onCreate(Bundle savedInstanceState) {
               super.onCreate(savedInstanceState);
               
-              // 请求权限
-              requestPermissions();
-              
               webView = new WebView(this);
               setContentView(webView);
               
@@ -105,31 +90,12 @@ jobs:
               webSettings.setJavaScriptEnabled(true);
               webSettings.setDomStorageEnabled(true);
               webSettings.setAllowFileAccess(true);
-              webSettings.setAllowFileAccessFromFileURLs(true);
-              webSettings.setAllowUniversalAccessFromFileURLs(true);
               webSettings.setMediaPlaybackRequiresUserGesture(false);
               
               webView.setWebViewClient(new WebViewClient());
               webView.setWebChromeClient(new WebChromeClient());
               
               webView.loadUrl("file:///android_asset/index.html");
-          }
-          
-          private void requestPermissions() {
-              if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                  String[] permissions = {
-                      Manifest.permission.RECORD_AUDIO,
-                      Manifest.permission.READ_MEDIA_AUDIO,
-                      Manifest.permission.POST_NOTIFICATIONS
-                  };
-                  ActivityCompat.requestPermissions(this, permissions, 1);
-              } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                  String[] permissions = {
-                      Manifest.permission.READ_EXTERNAL_STORAGE,
-                      Manifest.permission.RECORD_AUDIO
-                  };
-                  ActivityCompat.requestPermissions(this, permissions, 1);
-              }
           }
           
           @Override
@@ -151,9 +117,18 @@ jobs:
           <style name="AppTheme" parent="Theme.AppCompat.Light.NoActionBar">
               <item name="colorPrimary">#2c4b6e</item>
               <item name="colorPrimaryDark">#1a3b55</item>
-              <item name="colorAccent">#2c4b6e</item>
           </style>
       </resources>
+      EOF
+      
+      - name: 创建简单图标
+        run: |
+          cat > app/src/main/res/drawable/ic_launcher.xml << 'EOF'
+      <shape xmlns:android="http://schemas.android.com/apk/res/android"
+          android:shape="rectangle">
+          <solid android:color="#2c4b6e"/>
+          <corners android:radius="20dp"/>
+      </shape>
       EOF
       
       - name: 创建 build.gradle（项目级）
@@ -188,7 +163,6 @@ jobs:
       }
       
       android {
-          namespace 'com.music.player'
           compileSdk 34
           
           defaultConfig {
@@ -205,10 +179,6 @@ jobs:
                   proguardFiles getDefaultProguardFile('proguard-android-optimize.txt')
               }
           }
-          compileOptions {
-              sourceCompatibility JavaVersion.VERSION_1_8
-              targetCompatibility JavaVersion.VERSION_1_8
-          }
       }
       
       dependencies {
@@ -218,42 +188,31 @@ jobs:
       EOF
       
       - name: 创建 settings.gradle
-        run: |
-          cat > settings.gradle << 'EOF'
-      include ':app'
-      rootProject.name = "MusicPlayer"
-      EOF
+        run: echo "include ':app'" > settings.gradle
       
-      - name: 创建 gradle-wrapper.properties
+      - name: 下载 gradle-wrapper
         run: |
           mkdir -p gradle/wrapper
-          cat > gradle/wrapper/gradle-wrapper.properties << 'EOF'
-      distributionBase=GRADLE_USER_HOME
-      distributionPath=wrapper/dists
-      distributionUrl=https\://services.gradle.org/distributions/gradle-7.5-bin.zip
-      zipStoreBase=GRADLE_USER_HOME
-      zipStorePath=wrapper/dists
-      EOF
+          cd gradle/wrapper
+          wget https://raw.githubusercontent.com/gradle/gradle/master/gradle/wrapper/gradle-wrapper.jar
+          echo "distributionBase=GRADLE_USER_HOME" > gradle-wrapper.properties
+          echo "distributionPath=wrapper/dists" >> gradle-wrapper.properties
+          echo "distributionUrl=https\://services.gradle.org/distributions/gradle-7.5-bin.zip" >> gradle-wrapper.properties
+          echo "zipStoreBase=GRADLE_USER_HOME" >> gradle-wrapper.properties
+          echo "zipStorePath=wrapper/dists" >> gradle-wrapper.properties
+          cd ../..
       
-      - name: 创建空白图标资源
-        run: |
-          echo "ic_launcher" > app/src/main/res/mipmap-hdpi/ic_launcher.png
-          echo "ic_launcher" > app/src/main/res/mipmap-mdpi/ic_launcher.png
-          echo "ic_launcher" > app/src/main/res/mipmap-xhdpi/ic_launcher.png
-          echo "ic_launcher" > app/src/main/res/mipmap-xxhdpi/ic_launcher.png
-          echo "ic_launcher" > app/src/main/res/mipmap-xxxhdpi/ic_launcher.png
-      
-      - name: 生成 gradlew 脚本
+      - name: 创建 gradlew 脚本
         run: |
           cat > gradlew << 'EOF'
-      #!/bin/bash
-      echo "Gradle wrapper - 请使用 ./gradlew"
+      #!/bin/sh
+      JAVA_HOME=$JAVA_HOME_17_X64
+      exec java -cp gradle/wrapper/gradle-wrapper.jar org.gradle.wrapper.GradleWrapperMain "$@"
       EOF
           chmod +x gradlew
       
       - name: 构建 APK
         run: |
-          chmod +x gradlew 2>/dev/null || true
           ./gradlew assembleDebug --no-daemon
       
       - name: 上传 APK
