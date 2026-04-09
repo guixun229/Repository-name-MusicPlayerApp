@@ -8,115 +8,42 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    
     steps:
-      - name: Checkout code
+      - name: 检出代码
         uses: actions/checkout@v4
       
-      - name: Setup Java
+      - name: 设置 Java
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
-          java-version: '17'
+          java-version: '21'
       
-      - name: Setup Android SDK
+      - name: 设置 Android SDK
         uses: android-actions/setup-android@v3
       
-      - name: Create Android project
+      - name: 安装 Capacitor
         run: |
-          mkdir -p app/src/main/assets
-          cp -r www/* app/src/main/assets/
-          mkdir -p app/src/main/java/com/music/player
-          mkdir -p app/src/main/res/values
-          
-          cat > app/src/main/AndroidManifest.xml << 'XML'
-      <?xml version="1.0" encoding="utf-8"?>
-      <manifest package="com.music.player" xmlns:android="http://schemas.android.com/apk/res/android">
-          <uses-permission android:name="android.permission.INTERNET"/>
-          <application android:allowBackup="true" android:label="线条音乐盒" android:usesCleartextTraffic="true">
-              <activity android:name=".MainActivity" android:exported="true">
-                  <intent-filter>
-                      <action android:name="android.intent.action.MAIN"/>
-                      <category android:name="android.intent.category.LAUNCHER"/>
-                  </intent-filter>
-              </activity>
-          </application>
-      </manifest>
-      XML
-          
-          cat > app/src/main/java/com/music/player/MainActivity.java << 'JAVA'
-      package com.music.player;
-      import android.os.Bundle;
-      import android.webkit.WebView;
-      import android.webkit.WebViewClient;
-      import androidx.appcompat.app.AppCompatActivity;
-      public class MainActivity extends AppCompatActivity {
-          private WebView webView;
-          @Override
-          protected void onCreate(Bundle savedInstanceState) {
-              super.onCreate(savedInstanceState);
-              webView = new WebView(this);
-              webView.setWebViewClient(new WebViewClient());
-              webView.getSettings().setJavaScriptEnabled(true);
-              webView.loadUrl("file:///android_asset/index.html");
-              setContentView(webView);
-          }
-      }
-      JAVA
-          
-          cat > app/src/main/res/values/styles.xml << 'STYLE'
-      <?xml version="1.0" encoding="utf-8"?>
-      <resources>
-          <style name="AppTheme" parent="Theme.AppCompat.Light.NoActionBar"/>
-      </resources>
-      STYLE
+          npm install -g @capacitor/cli
+          npm install @capacitor/core @capacitor/android
       
-      - name: Create gradle files
-        run: |
-          cat > build.gradle << 'GRADLE'
-      buildscript {
-          repositories { google(); mavenCentral() }
-          dependencies { classpath 'com.android.tools.build:gradle:7.4.2' }
-      }
-      allprojects {
-          repositories { google(); mavenCentral() }
-      }
-      GRADLE
-          
-          cat > app/build.gradle << 'APP'
-      plugins { id 'com.android.application' }
-      android {
-          compileSdk 34
-          defaultConfig {
-              applicationId "com.music.player"
-              minSdk 21
-              targetSdk 34
-              versionCode 1
-              versionName "1.0"
-          }
-      }
-      dependencies {
-          implementation 'androidx.appcompat:appcompat:1.6.1'
-      }
-      APP
-          
-          echo "include ':app'" > settings.gradle
+      - name: 初始化 Capacitor
+        run: npx cap init 线条音乐盒 com.music.player --web-dir=www
       
-      - name: Setup gradle wrapper
-        run: |
-          mkdir -p gradle/wrapper
-          cd gradle/wrapper
-          wget -q https://github.com/gradle/gradle/raw/v7.5.0/gradle/wrapper/gradle-wrapper.jar
-          echo "distributionUrl=https\://services.gradle.org/distributions/gradle-7.5-bin.zip" > gradle-wrapper.properties
-          cd ../..
-          chmod +x gradlew 2>/dev/null || true
+      - name: 添加 Android 平台
+        run: npx cap add android
       
-      - name: Build APK
+      - name: 同步文件
+        run: npx cap sync
+      
+      - name: 构建 APK
         run: |
+          cd android
           chmod +x gradlew
           ./gradlew assembleDebug --no-daemon
       
-      - name: Upload APK
+      - name: 上传 APK
         uses: actions/upload-artifact@v4
         with:
           name: MusicPlayer-App
-          path: app/build/outputs/apk/debug/*.apk
+          path: android/app/build/outputs/apk/debug/*.apk
