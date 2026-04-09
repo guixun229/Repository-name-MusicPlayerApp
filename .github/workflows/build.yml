@@ -2,7 +2,7 @@ name: Build APK
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [ main ]
   workflow_dispatch:
 
 jobs:
@@ -12,41 +12,39 @@ jobs:
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
-      
+
       - name: 设置 Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-      
+          cache: 'npm' # 缓存npm依赖，加速构建
+
       - name: 设置 Java
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '17'
-      
+
       - name: 设置 Android SDK
         uses: android-actions/setup-android@v3
-      
-      - name: 安装 Capacitor
-        run: |
-          npm install -g @capacitor/cli
-          npm install @capacitor/core @capacitor/android
-      
-      - name: 初始化 Capacitor
-        run: npx cap init 线条音乐盒 com.music.player --web-dir=www
-      
-      - name: 添加 Android 平台
-        run: npx cap add android
-      
-      - name: 同步文件
-        run: npx cap sync
-      
+
+      # 1. 修复：只安装一次依赖，不重复初始化
+      - name: 安装项目依赖
+        run: npm install
+
+      # 2. 修复：删除冗余的 init 和 add android 步骤，只保留 sync
+      - name: 同步 Capacitor 配置
+        run: npx cap sync android
+
+      # 3. 修复：添加依赖刷新和缓存清理，彻底解决Kotlin冲突
       - name: 构建 APK
         run: |
           cd android
           chmod +x gradlew
-          ./gradlew assembleDebug
-      
+          # 清理旧缓存 + 刷新依赖 + 构建，彻底解决冲突
+          ./gradlew clean
+          ./gradlew --refresh-dependencies assembleDebug
+
       - name: 上传 APK
         uses: actions/upload-artifact@v4
         with:
