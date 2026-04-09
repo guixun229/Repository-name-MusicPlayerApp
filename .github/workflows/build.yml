@@ -8,47 +8,56 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    
+
     steps:
+      # 1. 下载代码
       - name: 检出代码
         uses: actions/checkout@v4
-      
-      - name: 设置 Java
+
+      # 2. 安装 Java (Android 编译需要)
+      - name: 设置 JDK 17
         uses: actions/setup-java@v4
         with:
-          distribution: 'temurin'
           java-version: '17'
+          distribution: 'temurin'
 
+      # 3. 安装 Node.js (让服务器自己装环境)
       - name: 设置 Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-      
-      - name: 设置 Android SDK
-        uses: android-actions/setup-android@v3
-      
-      - name: 安装 Capacitor
-        run: |
-          npm install -g @capacitor/cli
-          npm install @capacitor/core @capacitor/android
-      
-      - name: 初始化 Capacitor
-        run: npx cap init 线条音乐盒 com.music.player --web-dir=www
-      
-      - name: 添加 Android 平台
+
+      # 4. 安装 npm 依赖
+      - name: 安装依赖
+        run: npm ci
+
+      # 5. 【关键步骤】生成 Android 文件夹
+      # 这一步会自动在服务器上生成 android 目录
+      - name: 生成 Android 平台
         run: npx cap add android
-      
+
+      # 6. 同步代码
       - name: 同步文件
         run: npx cap sync
-      
+
+      # 7. 保存生成的 Android 文件夹到你的仓库
+      # 这一步非常重要，它会把生成的 android 文件夹上传回你的 GitHub
+      - name: 上传 Android 文件夹到仓库
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-folder
+          path: android/
+
+      # 8. 编译 APK
       - name: 构建 APK
         run: |
           cd android
           chmod +x gradlew
           ./gradlew assembleDebug --no-daemon
-      
+
+      # 9. 上传最终的 APK 文件
       - name: 上传 APK
         uses: actions/upload-artifact@v4
         with:
-          name: MusicPlayer-App
+          name: my-music-player-app
           path: android/app/build/outputs/apk/debug/*.apk
