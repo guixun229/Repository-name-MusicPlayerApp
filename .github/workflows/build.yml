@@ -10,151 +10,40 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-      - name: Checkout code
+      - name: 检出代码
         uses: actions/checkout@v4
       
-      - name: Setup Java
+      - name: 设置 Java
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
-          java-version: '11'
+          java-version: '21'
       
-      - name: Setup Android SDK
+      - name: 设置 Android SDK
         uses: android-actions/setup-android@v3
       
-      - name: Create Android project
+      - name: 安装 Capacitor
         run: |
-          # 创建目录结构
-          mkdir -p app/src/main/assets
-          cp index.html app/src/main/assets/
-          mkdir -p app/src/main/java/com/music/player
-          mkdir -p app/src/main/res/values
-          
-          # AndroidManifest.xml
-          cat > app/src/main/AndroidManifest.xml << 'EOF'
-      <?xml version="1.0" encoding="utf-8"?>
-      <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-          package="com.music.player">
-          <uses-permission android:name="android.permission.INTERNET"/>
-          <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
-          <uses-permission android:name="android.permission.RECORD_AUDIO"/>
-          <application android:allowBackup="true" android:label="线音" android:usesCleartextTraffic="true">
-              <activity android:name=".MainActivity" android:exported="true">
-                  <intent-filter>
-                      <action android:name="android.intent.action.MAIN"/>
-                      <category android:name="android.intent.category.LAUNCHER"/>
-                  </intent-filter>
-              </activity>
-          </application>
-      </manifest>
-      EOF
-          
-          # MainActivity.java
-          cat > app/src/main/java/com/music/player/MainActivity.java << 'EOF'
-      package com.music.player;
-      import android.os.Bundle;
-      import android.webkit.WebView;
-      import android.webkit.WebViewClient;
-      import android.webkit.WebChromeClient;
-      import android.webkit.WebSettings;
-      import androidx.appcompat.app.AppCompatActivity;
-      import android.Manifest;
-      import android.content.pm.PackageManager;
-      import android.os.Build;
-      import androidx.core.app.ActivityCompat;
+          npm install -g @capacitor/cli
+          npm install @capacitor/core @capacitor/android
       
-      public class MainActivity extends AppCompatActivity {
-          private WebView webView;
-          
-          @Override
-          protected void onCreate(Bundle savedInstanceState) {
-              super.onCreate(savedInstanceState);
-              
-              if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                  String[] perms = {Manifest.permission.RECORD_AUDIO, Manifest.permission.READ_EXTERNAL_STORAGE};
-                  if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-                      ActivityCompat.requestPermissions(this, perms, 1);
-                  }
-              }
-              
-              webView = new WebView(this);
-              setContentView(webView);
-              WebSettings ws = webView.getSettings();
-              ws.setJavaScriptEnabled(true);
-              ws.setDomStorageEnabled(true);
-              ws.setAllowFileAccess(true);
-              ws.setMediaPlaybackRequiresUserGesture(false);
-              webView.setWebViewClient(new WebViewClient());
-              webView.setWebChromeClient(new WebChromeClient());
-              webView.loadUrl("file:///android_asset/index.html");
-          }
-          
-          @Override
-          public void onBackPressed() {
-              if (webView.canGoBack()) webView.goBack();
-              else super.onBackPressed();
-          }
-      }
-      EOF
-          
-          # styles.xml
-          cat > app/src/main/res/values/styles.xml << 'EOF'
-      <?xml version="1.0" encoding="utf-8"?>
-      <resources>
-          <style name="AppTheme" parent="Theme.AppCompat.Light.NoActionBar"/>
-      </resources>
-      EOF
+      - name: 初始化 Capacitor
+        run: npx cap init 线条音乐盒 com.music.player --web-dir=www
       
-      - name: Create Gradle files
+      - name: 添加 Android 平台
+        run: npx cap add android
+      
+      - name: 同步文件
+        run: npx cap sync
+      
+      - name: 构建 APK
         run: |
-          cat > build.gradle << 'EOF'
-      buildscript {
-          repositories { google(); mavenCentral() }
-          dependencies { classpath 'com.android.tools.build:gradle:7.4.2' }
-      }
-      EOF
-          
-          cat > app/build.gradle << 'EOF'
-      plugins { id 'com.android.application' }
-      android {
-          compileSdk 34
-          defaultConfig {
-              applicationId "com.music.player"
-              minSdk 21
-              targetSdk 34
-              versionCode 1
-              versionName "1.0"
-          }
-      }
-      dependencies {
-          implementation 'androidx.appcompat:appcompat:1.6.1'
-      }
-      EOF
-          
-          echo "include ':app'" > settings.gradle
-      
-      - name: Setup Gradle Wrapper
-        run: |
-          mkdir -p gradle/wrapper
-          cd gradle/wrapper
-          wget -q https://github.com/gradle/gradle/raw/v7.5.0/gradle/wrapper/gradle-wrapper.jar
-          echo "distributionUrl=https\://services.gradle.org/distributions/gradle-7.5-bin.zip" > gradle-wrapper.properties
-          cd ../..
-      
-      - name: Create gradlew script
-        run: |
-          cat > gradlew << 'EOF'
-      #!/bin/sh
-      JAVA_HOME=$JAVA_HOME_11_X64
-      exec java -cp gradle/wrapper/gradle-wrapper.jar org.gradle.wrapper.GradleWrapperMain "$@"
-      EOF
+          cd android
           chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
       
-      - name: Build APK
-        run: ./gradlew assembleDebug --no-daemon
-      
-      - name: Upload APK
+      - name: 上传 APK
         uses: actions/upload-artifact@v4
         with:
           name: MusicPlayer-App
-          path: app/build/outputs/apk/debug/*.apk
+          path: android/app/build/outputs/apk/debug/*.apk
