@@ -2,7 +2,7 @@ name: Build APK
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, master ]
   workflow_dispatch:
 
 jobs:
@@ -12,39 +12,41 @@ jobs:
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
-
+      
       - name: 设置 Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm' # 缓存npm依赖，加速构建
-
-      - name: 设置 Java
+      
+      - name: 设置 Java 17
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '17'
-
+      
       - name: 设置 Android SDK
         uses: android-actions/setup-android@v3
 
-      # 1. 修复：只安装一次依赖，不重复初始化
-      - name: 安装项目依赖
+      # 强制保证 www/index.html 一定存在
+      - name: 创建网页入口
+        run: |
+          mkdir -p www
+          echo '<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>音乐播放器</body></html>' > www/index.html
+      
+      - name: 安装依赖
         run: npm install
-
-      # 2. 修复：删除冗余的 init 和 add android 步骤，只保留 sync
-      - name: 同步 Capacitor 配置
-        run: npx cap sync android
-
-      # 3. 修复：添加依赖刷新和缓存清理，彻底解决Kotlin冲突
+      
+      # 只同步，不重新初始化、不重新添加平台
+      - name: 同步 Capacitor
+        run: npx cap sync
+      
       - name: 构建 APK
         run: |
           cd android
           chmod +x gradlew
-          # 清理旧缓存 + 刷新依赖 + 构建，彻底解决冲突
           ./gradlew clean
-          ./gradlew --refresh-dependencies assembleDebug
-
+          ./gradlew assembleDebug
+      
       - name: 上传 APK
         uses: actions/upload-artifact@v4
         with:
