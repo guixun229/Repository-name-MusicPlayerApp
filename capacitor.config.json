@@ -1,0 +1,9 @@
+{
+  "appId": "com.music.player",
+  "appName": "线条音乐盒",
+  "webDir": ".",
+  "bundledWebRuntime": false,
+  "server": {
+    "androidScheme": "https"
+  }
+}
