@@ -8,163 +8,84 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    
     steps:
-      - name: 检出代码
+      - name: Checkout code
         uses: actions/checkout@v4
       
-      - name: 设置 Java
+      - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '17'
       
-      - name: 设置 Android SDK
+      - name: Setup Android SDK
         uses: android-actions/setup-android@v3
       
-      - name: 创建 Android 项目结构
+      - name: Create Android project
         run: |
-          # 创建目录
           mkdir -p app/src/main/assets
+          cp -r www/* app/src/main/assets/
           mkdir -p app/src/main/java/com/music/player
           mkdir -p app/src/main/res/values
-          mkdir -p app/src/main/res/drawable
           
-          # 复制网页文件
-          cp -r www/* app/src/main/assets/
-          
-          # 创建 AndroidManifest.xml
-          cat > app/src/main/AndroidManifest.xml << 'EOF'
+          cat > app/src/main/AndroidManifest.xml << 'XML'
       <?xml version="1.0" encoding="utf-8"?>
-      <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-          package="com.music.player">
-      
-          <uses-permission android:name="android.permission.INTERNET" />
-          <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
-          <uses-permission android:name="android.permission.RECORD_AUDIO" />
-      
-          <application
-              android:allowBackup="true"
-              android:icon="@drawable/ic_launcher"
-              android:label="线条音乐盒"
-              android:usesCleartextTraffic="true"
-              android:theme="@style/AppTheme">
-              
-              <activity
-                  android:name=".MainActivity"
-                  android:configChanges="orientation|keyboardHidden|screenSize"
-                  android:exported="true">
+      <manifest package="com.music.player" xmlns:android="http://schemas.android.com/apk/res/android">
+          <uses-permission android:name="android.permission.INTERNET"/>
+          <application android:allowBackup="true" android:label="线条音乐盒" android:usesCleartextTraffic="true">
+              <activity android:name=".MainActivity" android:exported="true">
                   <intent-filter>
-                      <action android:name="android.intent.action.MAIN" />
-                      <category android:name="android.intent.category.LAUNCHER" />
+                      <action android:name="android.intent.action.MAIN"/>
+                      <category android:name="android.intent.category.LAUNCHER"/>
                   </intent-filter>
               </activity>
-              
           </application>
       </manifest>
-      EOF
-      
-      - name: 创建 MainActivity.java
-        run: |
-          cat > app/src/main/java/com/music/player/MainActivity.java << 'EOF'
+      XML
+          
+          cat > app/src/main/java/com/music/player/MainActivity.java << 'JAVA'
       package com.music.player;
-      
       import android.os.Bundle;
       import android.webkit.WebView;
       import android.webkit.WebViewClient;
-      import android.webkit.WebChromeClient;
-      import android.webkit.WebSettings;
       import androidx.appcompat.app.AppCompatActivity;
-      
       public class MainActivity extends AppCompatActivity {
           private WebView webView;
-          
           @Override
           protected void onCreate(Bundle savedInstanceState) {
               super.onCreate(savedInstanceState);
-              
               webView = new WebView(this);
-              setContentView(webView);
-              
-              WebSettings webSettings = webView.getSettings();
-              webSettings.setJavaScriptEnabled(true);
-              webSettings.setDomStorageEnabled(true);
-              webSettings.setAllowFileAccess(true);
-              webSettings.setMediaPlaybackRequiresUserGesture(false);
-              
               webView.setWebViewClient(new WebViewClient());
-              webView.setWebChromeClient(new WebChromeClient());
-              
+              webView.getSettings().setJavaScriptEnabled(true);
               webView.loadUrl("file:///android_asset/index.html");
-          }
-          
-          @Override
-          public void onBackPressed() {
-              if (webView.canGoBack()) {
-                  webView.goBack();
-              } else {
-                  super.onBackPressed();
-              }
+              setContentView(webView);
           }
       }
-      EOF
-      
-      - name: 创建主题样式
-        run: |
-          cat > app/src/main/res/values/styles.xml << 'EOF'
+      JAVA
+          
+          cat > app/src/main/res/values/styles.xml << 'STYLE'
       <?xml version="1.0" encoding="utf-8"?>
       <resources>
-          <style name="AppTheme" parent="Theme.AppCompat.Light.NoActionBar">
-              <item name="colorPrimary">#2c4b6e</item>
-              <item name="colorPrimaryDark">#1a3b55</item>
-          </style>
+          <style name="AppTheme" parent="Theme.AppCompat.Light.NoActionBar"/>
       </resources>
-      EOF
+      STYLE
       
-      - name: 创建简单图标
+      - name: Create gradle files
         run: |
-          cat > app/src/main/res/drawable/ic_launcher.xml << 'EOF'
-      <shape xmlns:android="http://schemas.android.com/apk/res/android"
-          android:shape="rectangle">
-          <solid android:color="#2c4b6e"/>
-          <corners android:radius="20dp"/>
-      </shape>
-      EOF
-      
-      - name: 创建 build.gradle（项目级）
-        run: |
-          cat > build.gradle << 'EOF'
+          cat > build.gradle << 'GRADLE'
       buildscript {
-          repositories {
-              google()
-              mavenCentral()
-          }
-          dependencies {
-              classpath 'com.android.tools.build:gradle:7.4.2'
-          }
+          repositories { google(); mavenCentral() }
+          dependencies { classpath 'com.android.tools.build:gradle:7.4.2' }
       }
-      
       allprojects {
-          repositories {
-              google()
-              mavenCentral()
-          }
+          repositories { google(); mavenCentral() }
       }
-      task clean(type: Delete) {
-          delete rootProject.buildDir
-      }
-      EOF
-      
-      - name: 创建 build.gradle（应用级）
-        run: |
-          cat > app/build.gradle << 'EOF'
-      plugins {
-          id 'com.android.application'
-      }
-      
+      GRADLE
+          
+          cat > app/build.gradle << 'APP'
+      plugins { id 'com.android.application' }
       android {
           compileSdk 34
-          
           defaultConfig {
               applicationId "com.music.player"
               minSdk 21
@@ -172,50 +93,29 @@ jobs:
               versionCode 1
               versionName "1.0"
           }
-          
-          buildTypes {
-              release {
-                  minifyEnabled false
-                  proguardFiles getDefaultProguardFile('proguard-android-optimize.txt')
-              }
-          }
       }
-      
       dependencies {
           implementation 'androidx.appcompat:appcompat:1.6.1'
-          implementation 'androidx.webkit:webkit:1.9.0'
       }
-      EOF
+      APP
+          
+          echo "include ':app'" > settings.gradle
       
-      - name: 创建 settings.gradle
-        run: echo "include ':app'" > settings.gradle
-      
-      - name: 下载 gradle-wrapper
+      - name: Setup gradle wrapper
         run: |
           mkdir -p gradle/wrapper
           cd gradle/wrapper
-          wget https://raw.githubusercontent.com/gradle/gradle/master/gradle/wrapper/gradle-wrapper.jar
-          echo "distributionBase=GRADLE_USER_HOME" > gradle-wrapper.properties
-          echo "distributionPath=wrapper/dists" >> gradle-wrapper.properties
-          echo "distributionUrl=https\://services.gradle.org/distributions/gradle-7.5-bin.zip" >> gradle-wrapper.properties
-          echo "zipStoreBase=GRADLE_USER_HOME" >> gradle-wrapper.properties
-          echo "zipStorePath=wrapper/dists" >> gradle-wrapper.properties
+          wget -q https://github.com/gradle/gradle/raw/v7.5.0/gradle/wrapper/gradle-wrapper.jar
+          echo "distributionUrl=https\://services.gradle.org/distributions/gradle-7.5-bin.zip" > gradle-wrapper.properties
           cd ../..
+          chmod +x gradlew 2>/dev/null || true
       
-      - name: 创建 gradlew 脚本
+      - name: Build APK
         run: |
-          cat > gradlew << 'EOF'
-      #!/bin/sh
-      JAVA_HOME=$JAVA_HOME_17_X64
-      exec java -cp gradle/wrapper/gradle-wrapper.jar org.gradle.wrapper.GradleWrapperMain "$@"
-      EOF
           chmod +x gradlew
-      
-      - name: 构建 APK
-        run: |
           ./gradlew assembleDebug --no-daemon
       
-      - name: 上传 APK
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: MusicPlayer-App
