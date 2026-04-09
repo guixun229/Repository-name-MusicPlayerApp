@@ -1,60 +1,49 @@
-name: Android CI
+name: Build APK
 
 on:
   push:
-    branches: [ "main", "master" ] # 监听 main 或 master 分支的推送
-  pull_request:
-    branches: [ "main", "master" ]
+    branches: [ main, master ]
+  workflow_dispatch:
 
 jobs:
   build:
-    runs-on: ubuntu-latest # 使用最新的 Ubuntu 服务器环境
-
+    runs-on: ubuntu-latest
+    
     steps:
-      # 1. 获取你的代码
-      - name: 检出代码 (Checkout Code)
+      - name: 检出代码
         uses: actions/checkout@v4
-
-      # 2. 安装 Java (Android 需要)
-      - name: 设置 JDK (Setup Java)
+      
+      - name: 设置 Java
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
-          java-version: '17' # 使用 Java 17
-
-      # 3. 安装 Node.js (关键步骤：让服务器安装 Node)
-      - name: 设置 Node.js (Setup Node)
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20' # 使用 Node 20
-
-      # 4. 安装 npm 依赖
-      - name: 安装依赖 (Install Dependencies)
-        run: npm ci
-
-      # 5. 生成 Android 项目 (关键步骤：自动创建 android 文件夹)
-      - name: 添加 Android 平台 (Add Android Platform)
+          java-version: '17'
+      
+      - name: 设置 Android SDK
+        uses: android-actions/setup-android@v3
+      
+      - name: 安装 Capacitor
         run: |
-          # 如果 android 文件夹不存在，则创建
-          if [ ! -d "android" ]; then
-            npx cap add android
-          fi
-          # 同步代码到 Android
-          npx cap sync android
-
-      # 6. 给 gradlew 权限 (Linux 系统需要)
-      - name: 授予权限 (Grant Execute Permission)
-        run: chmod +x ./android/gradlew
-
-      # 7. 编译 APK
-      - name: 构建 APK (Build APK)
+          npm install -g @capacitor/cli
+          npm install @capacitor/core @capacitor/android
+      
+      - name: 初始化 Capacitor
+        run: npx cap init 线条音乐盒 com.music.player --web-dir=www
+      
+      - name: 添加 Android 平台
+        run: npx cap add android
+      
+      - name: 同步文件
+        run: npx cap sync
+      
+      - name: 构建 APK
         run: |
           cd android
-          ./gradlew assembleDebug
-
-      # 8. 上传 APK (方便下载)
-      - name: 上传 APK (Upload Artifact)
-        uses: actions/upload-artifact@v3
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+      
+      - name: 上传 APK
+        uses: actions/upload-artifact@v4
         with:
-          name: my-app-debug.apk
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          name: MusicPlayer-App
+          path: android/app/build/outputs/apk/debug/*.apk
