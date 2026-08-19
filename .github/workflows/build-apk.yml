@@ -1,9 +1,8 @@
 name: Build APK
 
-# 触发条件：推送到 main 分支，或手动点击按钮触发
 on:
   push:
-    branches: [ "main" ]
+    branches: [ main, master ]
   workflow_dispatch:
 
 jobs:
@@ -11,40 +10,51 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. 拉取你的代码
-      - name: Checkout code
+      - name: 拉取代码
         uses: actions/checkout@v4
 
-      # 2. 安装 Node.js 环境
-      - name: Setup Node.js
+      - name: 安装 Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 18
-          cache: 'npm'
+          node-version: '20'
 
-      # 3. 安装依赖（如果有 package.json）
-      - name: Install dependencies
+      - name: 安装 Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: 安装 Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platforms;android-34 build-tools;34.0.0'
+
+      - name: 安装依赖
         run: npm install
 
-      # 4. 【重要】编译 Web 资源（如果你有 src 源码需要编译）
-      #    如果你直接修改 www 文件夹，可以注释掉下面这行
-      - name: Build Web Assets
-        run: npm run build || echo "跳过构建（直接使用 www 目录）"
+      - name: 准备 Web 资源
+        run: |
+          mkdir -p www
+          cp facai.html www/index.html
+          cp manifest.json www/
+          cp service-worker.js www/
+          cp icon-192.png www/
+          cp icon-512.png www/
+          cp apple-touch-icon.png www/
 
-      # 5. 同步 Capacitor（复制 www 到 Android 项目）
-      - name: Sync Capacitor Android
+      - name: 添加 Android 平台
+        run: npx cap add android || true
+
+      - name: 同步 Web 资源
         run: npx cap sync android
 
-      # 6. 编译生成 APK（Debug 调试版）
-      - name: Build Android APK
-        run: |
-          cd android
-          chmod +x gradlew
-          ./gradlew assembleDebug
+      - name: 构建 APK
+        working-directory: android
+        run: ./gradlew assembleDebug --no-daemon
 
-      # 7. 上传 APK 到 Actions 页面，供你下载
-      - name: Upload APK
+      - name: 上传 APK
         uses: actions/upload-artifact@v4
         with:
-          name: app-debug
+          name: facai-apk
           path: android/app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 30
