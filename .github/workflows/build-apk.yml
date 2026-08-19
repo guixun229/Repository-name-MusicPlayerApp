@@ -1,0 +1,50 @@
+name: Build APK
+
+# 触发条件：推送到 main 分支，或手动点击按钮触发
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. 拉取你的代码
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # 2. 安装 Node.js 环境
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+          cache: 'npm'
+
+      # 3. 安装依赖（如果有 package.json）
+      - name: Install dependencies
+        run: npm install
+
+      # 4. 【重要】编译 Web 资源（如果你有 src 源码需要编译）
+      #    如果你直接修改 www 文件夹，可以注释掉下面这行
+      - name: Build Web Assets
+        run: npm run build || echo "跳过构建（直接使用 www 目录）"
+
+      # 5. 同步 Capacitor（复制 www 到 Android 项目）
+      - name: Sync Capacitor Android
+        run: npx cap sync android
+
+      # 6. 编译生成 APK（Debug 调试版）
+      - name: Build Android APK
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleDebug
+
+      # 7. 上传 APK 到 Actions 页面，供你下载
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-debug
+          path: android/app/build/outputs/apk/debug/app-debug.apk
