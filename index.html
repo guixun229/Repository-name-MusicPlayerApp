@@ -19,6 +19,7 @@
 <link rel="icon" type="image/png" sizes="16x16" href="icons/favicon-16.png">
 <link rel="shortcut icon" href="icons/favicon.ico">
 <meta name="version" content="1.2.1">
+<script src="cordova.js"></script>
 <title>音轨</title>
 <style>
 /* ==================== Reset & Base ==================== */
@@ -721,6 +722,8 @@ body {
   font-size: 16px;
   padding: 0 4px;
   flex-shrink: 0;
+  touch-action: none;
+  cursor: grab;
 }
 
 .empty-list {
@@ -1022,6 +1025,128 @@ body {
 
 .data-btn:active { background: rgba(212, 175, 55, 0.15); transform: scale(0.97); }
 
+/* ==================== Batch Mode ==================== */
+.list-actions.batch-mode { display: none; }
+
+.batch-toolbar {
+  display: none;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 24px 12px;
+  flex-shrink: 0;
+}
+.batch-toolbar.show { display: flex; }
+.list-actions.batch-mode + .batch-toolbar { display: flex; }
+
+.batch-select-all {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border: 1px solid var(--accent-dim);
+  border-radius: 10px;
+  font-size: 13px;
+  color: var(--accent);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.2s;
+  touch-action: manipulation;
+}
+.batch-select-all:active { transform: scale(0.97); }
+
+.batch-select-all .check-box {
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--accent-dim);
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+  flex-shrink: 0;
+}
+.batch-select-all.checked .check-box {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.batch-select-all.checked .check-box::after {
+  content: '✓';
+  color: #0a0a0a;
+  font-size: 12px;
+  font-weight: bold;
+}
+
+.batch-count {
+  flex: 1;
+  text-align: center;
+  font-size: 13px;
+  color: rgba(255,255,255,0.5);
+  font-weight: 500;
+}
+
+.batch-categorize-btn {
+  padding: 10px 16px;
+  border: none;
+  border-radius: 10px;
+  background: var(--edit-blue);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.2s;
+  touch-action: manipulation;
+  letter-spacing: 1px;
+}
+.batch-categorize-btn:active { transform: scale(0.97); filter: brightness(0.85); }
+.batch-categorize-btn:disabled { opacity: 0.4; }
+
+.batch-delete-btn {
+  padding: 10px 16px;
+  border: none;
+  border-radius: 10px;
+  background: var(--delete-red);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.2s;
+  touch-action: manipulation;
+  letter-spacing: 1px;
+}
+.batch-delete-btn:active { transform: scale(0.97); filter: brightness(0.85); }
+.batch-delete-btn:disabled { opacity: 0.4; }
+
+.track-item .batch-check {
+  display: none;
+  width: 22px;
+  height: 22px;
+  min-width: 22px;
+  border: 2px solid rgba(255,255,255,0.25);
+  border-radius: 5px;
+  margin-right: 12px;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+  flex-shrink: 0;
+}
+.track-item.batch-mode .batch-check { display: flex; }
+.track-item.batch-mode .track-drag-handle { display: none; }
+.track-item.batch-mode .track-actions { display: none; }
+.track-item.batch-mode .track-item-content { touch-action: manipulation; }
+
+.track-item.batch-selected .batch-check {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.track-item.batch-selected .batch-check::after {
+  content: '✓';
+  color: #0a0a0a;
+  font-size: 13px;
+  font-weight: bold;
+}
+
 /* ==================== Modal ==================== */
 .modal-overlay {
   position: fixed;
@@ -1194,13 +1319,23 @@ input[type="file"] { display: none; }
 
   <div class="category-bar" id="categoryBar"></div>
 
-  <div class="list-actions">
+  <div class="list-actions" id="listActions">
     <div class="action-btn" id="addAudioBtn">
       <span class="action-icon">+</span>添加音频
     </div>
     <div class="action-btn" id="extractVideoBtn">
       <span class="action-icon">►</span>提取视频音频
     </div>
+  </div>
+
+  <div class="batch-toolbar" id="batchToolbar">
+    <div class="batch-select-all" id="batchSelectAll">
+      <div class="check-box"></div>
+      <span>全选</span>
+    </div>
+    <span class="batch-count" id="batchCount">已选 0 项</span>
+    <button class="batch-categorize-btn" id="batchCategorizeBtn" disabled>分类</button>
+    <button class="batch-delete-btn" id="batchDeleteConfirm" disabled>删除</button>
   </div>
 
   <div class="track-list-wrapper" id="trackListWrapper">
@@ -1373,6 +1508,10 @@ let isPlaying = false;
 let playMode = 'sequence';
 let currentMedia = null;
 
+// Batch mode state
+let batchMode = false;
+let batchSelected = new Set();
+
 // Rotation state
 let rotationAngle = 0;
 let rotationSpeed = 0;
@@ -1447,6 +1586,12 @@ const audioPlayer = document.getElementById('audioPlayer');
 const videoPlayer = document.getElementById('videoPlayer');
 const audioInput = document.getElementById('audioInput');
 const videoInput = document.getElementById('videoInput');
+const batchToolbar = document.getElementById('batchToolbar');
+const listActionsEl = document.getElementById('listActions');
+const batchSelectAll = document.getElementById('batchSelectAll');
+const batchCountEl = document.getElementById('batchCount');
+const batchDeleteConfirm = document.getElementById('batchDeleteConfirm');
+const batchCategorizeBtn = document.getElementById('batchCategorizeBtn');
 const progressFill = document.getElementById('progressFill');
 const progressBar = document.getElementById('progressBar');
 const seekDisplay = document.getElementById('seekDisplay');
@@ -1733,6 +1878,109 @@ function generateArtwork() {
 }
 
 // ==================== Media Session API ====================
+// ==================== Background Audio Keep-Alive (息屏后播放不中断) ====================
+let wakeLock = null;
+let silentAudioCtx = null;
+let silentSource = null;
+
+// 创建一个静音的 Web Audio 振荡器，防止浏览器在后台时暂停音频
+function startSilentKeepAlive() {
+  try {
+    if (!silentAudioCtx && 'AudioContext' in window) {
+      silentAudioCtx = new AudioContext();
+      // 创建一个几乎静音的振荡器（0.001振幅，人耳不可听）
+      silentSource = silentAudioCtx.createOscillator();
+      const gain = silentAudioCtx.createGain();
+      gain.gain.value = 0.001;
+      silentSource.frequency.value = 1;
+      silentSource.connect(gain);
+      gain.connect(silentAudioCtx.destination);
+      silentSource.start();
+    }
+    // 如果上下文被浏览器挂起，尝试恢复
+    if (silentAudioCtx && silentAudioCtx.state === 'suspended') {
+      silentAudioCtx.resume();
+    }
+  } catch (e) {
+    console.warn('Silent keep-alive failed:', e);
+  }
+}
+
+function stopSilentKeepAlive() {
+  if (silentSource) {
+    try { silentSource.stop(); } catch (e) {}
+    silentSource = null;
+  }
+  if (silentAudioCtx) {
+    try { silentAudioCtx.close(); } catch (e) {}
+    silentAudioCtx = null;
+  }
+}
+
+async function requestWakeLock() {
+  try {
+    if ('wakeLock' in navigator) {
+      wakeLock = await navigator.wakeLock.request('screen');
+      wakeLock.addEventListener('release', () => {
+        wakeLock = null;
+      });
+    }
+  } catch (e) {
+    console.warn('Wake Lock request failed:', e);
+  }
+}
+
+function releaseWakeLock() {
+  if (wakeLock) {
+    wakeLock.release();
+    wakeLock = null;
+  }
+}
+
+// 页面可见性变化 - 恢复 Wake Lock 和静音保活
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && isPlaying) {
+    requestWakeLock();
+    startSilentKeepAlive();
+  }
+});
+
+// 页面生命周期 - 处理 freeze/resume 事件
+document.addEventListener('freeze', () => {
+  // 页面被浏览器冻结前，确保 Media Session 状态正确
+  if ('mediaSession' in navigator) {
+    navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';
+  }
+});
+
+document.addEventListener('resume', () => {
+  // 页面从冻结状态恢复
+  if (isPlaying) {
+    requestWakeLock();
+    startSilentKeepAlive();
+    // 确保 Media Session 仍然有效
+    updateMediaSession();
+  }
+});
+
+// pagehide - 确保后台播放状态正确
+window.addEventListener('pagehide', (event) => {
+  if (isPlaying) {
+    // 确保浏览器知道我们正在播放，应该在后台继续
+    if ('mediaSession' in navigator) {
+      navigator.mediaSession.playbackState = 'playing';
+    }
+  }
+});
+
+window.addEventListener('pageshow', (event) => {
+  if (event.persisted && isPlaying) {
+    requestWakeLock();
+    startSilentKeepAlive();
+    updateMediaSession();
+  }
+});
+
 function setupMediaSession() {
   if (!('mediaSession' in navigator)) return;
   navigator.mediaSession.setActionHandler('play', () => play());
@@ -1843,19 +2091,35 @@ function play() {
   isPlaying = true;
   targetSpeed = PLAY_SPEED;
   startAnimation();
+  // 先更新 Media Session 元数据（让浏览器知道这是媒体应用，息屏后应继续播放）
+  updateMediaSession();
+  // 请求屏幕常亮锁
+  requestWakeLock();
+  // 启动静音保活（防止浏览器在后台挂起音频上下文）
+  startSilentKeepAlive();
+  // 设置播放状态
+  if ('mediaSession' in navigator) {
+    navigator.mediaSession.playbackState = 'playing';
+  }
+  // 播放音频
   const playPromise = currentMedia.play();
   if (playPromise && playPromise.catch) {
     playPromise.catch(() => { showToast('播放失败'); pause(); });
   }
   updateTrackList();
-  updateMediaSession();
 }
 
 function pause() {
   isPlaying = false;
   targetSpeed = 0;
   startAnimation();
+  releaseWakeLock();
+  // 注意：暂停时不停止静音保活，避免播放状态切换导致后台音频中断
+  // 仅在完全停止时才停止
   currentMedia.pause();
+  if ('mediaSession' in navigator) {
+    navigator.mediaSession.playbackState = 'paused';
+  }
   updateTrackList();
   updateMediaSession();
 }
@@ -2122,6 +2386,7 @@ function openList() {
 
 function closeList() {
   closeAllRevealedItems();
+  if (batchMode) exitBatchMode();
   document.getElementById('list-view').classList.remove('show');
 }
 
@@ -2530,13 +2795,17 @@ function updateTrackList() {
     const playing = isActive && isPlaying;
     const typeLabel = track.type === 'video' ? '视频音频' : '音频';
     const typeClass = track.type === 'video' ? 'video' : '';
+    const batchCls = batchMode ? 'batch-mode' : '';
+    const batchSel = batchSelected.has(trackIdx) ? 'batch-selected' : '';
+    const batchCheckHtml = '<div class="batch-check"></div>';
     return `
-      <div class="track-item ${isActive ? 'active' : ''}" data-track-index="${trackIdx}" data-display-index="${displayIdx}">
+      <div class="track-item ${batchCls} ${batchSel} ${isActive ? 'active' : ''}" data-track-index="${trackIdx}" data-display-index="${displayIdx}">
         <div class="track-actions">
           <div class="track-action edit" data-action="edit">编辑</div>
           <div class="track-action delete" data-action="delete">删除</div>
         </div>
         <div class="track-item-content">
+          ${batchMode ? batchCheckHtml : ''}
           <span class="track-number">${playing ? '▶' : (displayIdx + 1)}</span>
           <div class="track-info-cell">
             <div class="track-name">${escapeHtml(track.name)}</div>
@@ -2547,6 +2816,7 @@ function updateTrackList() {
       </div>`;
   }).join('');
   attachTrackItemListeners();
+  updateBatchUI();
 }
 
 function attachTrackItemListeners() {
@@ -2555,9 +2825,21 @@ function attachTrackItemListeners() {
     const editBtn = item.querySelector('.track-action.edit');
     const deleteBtn = item.querySelector('.track-action.delete');
 
+    // Batch mode: tap item toggles selection
+    if (batchMode) {
+      content.addEventListener('touchend', e => {
+        e.preventDefault();
+        toggleBatchSelect(parseInt(item.dataset.trackIndex));
+      }, { passive: false });
+      content.addEventListener('click', e => {
+        e.preventDefault();
+        e.stopPropagation();
+      });
+      return; // skip normal gesture/listener attachment in batch mode
+    }
+
     // Use touchend for instant response on mobile
     function handleBtnTouch(btn, action) {
-      // Stop touchstart from reaching the content gesture handler
       btn.addEventListener('touchstart', e => {
         e.stopPropagation();
       }, { passive: true });
@@ -2570,7 +2852,6 @@ function attachTrackItemListeners() {
         closeAllRevealedItems();
         action(parseInt(item.dataset.trackIndex));
       }, { passive: false });
-      // Also keep click for desktop
       btn.addEventListener('click', e => {
         e.stopPropagation();
       });
@@ -2587,7 +2868,7 @@ function attachTrackItemGestures(content, item) {
   let startX = 0, startY = 0, startTime = 0;
   let deltaX = 0, deltaY = 0;
   let lastDeltaY = 0;
-  let mode = 'pending'; // 'pending' | 'swipe' | 'drag' | 'scroll'
+  let mode = 'pending'; // 'pending' | 'swipe' | 'drag' | 'scroll' | 'batch'
   let longPressTimer = null;
   let itemHeight = 0;
   let dragStartIndex = -1;
@@ -2595,10 +2876,13 @@ function attachTrackItemGestures(content, item) {
   let trackIndices = [];
   let lastTargetIndex = -1;
   let autoScrollRAF = null;
+  let isHandleTouch = false;
 
   content.addEventListener('touchstart', e => {
     if (e.touches.length > 1) return;
     const t = e.touches[0];
+    // 检测是否触摸在拖拽手柄上
+    isHandleTouch = e.target.classList && e.target.classList.contains('track-drag-handle');
     startX = t.clientX;
     startY = t.clientY;
     startTime = Date.now();
@@ -2612,16 +2896,24 @@ function attachTrackItemGestures(content, item) {
     // Long press timer (400ms) - fires if finger stays nearly still
     longPressTimer = setTimeout(() => {
       if (mode === 'pending') {
-        mode = 'drag';
-        content.classList.add('dragging');
-        item.classList.add('dragging-mode');
-        // Hide edit/delete on all items during drag
-        trackList.querySelectorAll('.track-item').forEach(it => it.classList.add('dragging-mode'));
-        if (navigator.vibrate) navigator.vibrate(50);
-        allItems = Array.from(trackList.querySelectorAll('.track-item'));
-        trackIndices = getFilteredTrackIndices();
-        dragStartIndex = parseInt(item.dataset.displayIndex);
-        lastTargetIndex = dragStartIndex;
+        if (isHandleTouch) {
+          // 长按拖拽手柄 → 进入拖拽排序模式
+          mode = 'drag';
+          content.classList.add('dragging');
+          item.classList.add('dragging-mode');
+          trackList.querySelectorAll('.track-item').forEach(it => it.classList.add('dragging-mode'));
+          if (navigator.vibrate) navigator.vibrate(50);
+          allItems = Array.from(trackList.querySelectorAll('.track-item'));
+          trackIndices = getFilteredTrackIndices();
+          dragStartIndex = parseInt(item.dataset.displayIndex);
+          lastTargetIndex = dragStartIndex;
+        } else {
+          // 长按其他区域 → 进入批量选择模式
+          const trackIdx = parseInt(item.dataset.trackIndex);
+          if (navigator.vibrate) navigator.vibrate(50);
+          enterBatchMode(trackIdx);
+          mode = 'batch';
+        }
       }
     }, 400);
   }, { passive: true });
@@ -2730,6 +3022,7 @@ function attachTrackItemGestures(content, item) {
       }
       item.dataset.targetIndex = targetIdx;
     }
+    // 'batch' mode: no move handling needed
   }, { passive: false });
 
   content.addEventListener('touchend', e => {
@@ -2791,6 +3084,8 @@ function attachTrackItemGestures(content, item) {
       }
       delete item.dataset.targetIndex;
       updateTrackList();
+    } else if (mode === 'batch') {
+      // Batch mode already entered on long-press, nothing to do on touchend
     } else if (mode === 'scroll') {
       content.style.transition = '';
       content.style.transform = '';
@@ -2893,6 +3188,129 @@ async function showTrackDeleteConfirm(trackIdx) {
   showToast('已删除');
 }
 
+// ==================== Batch Delete ====================
+function toggleBatchSelect(trackIdx) {
+  if (batchSelected.has(trackIdx)) {
+    batchSelected.delete(trackIdx);
+  } else {
+    batchSelected.add(trackIdx);
+  }
+  updateTrackList();
+}
+
+function updateBatchUI() {
+  const count = batchSelected.size;
+  batchCountEl.textContent = `已选 ${count} 项`;
+  batchDeleteConfirm.disabled = count === 0;
+  batchCategorizeBtn.disabled = count === 0;
+
+  const filtered = getFilteredTrackIndices();
+  const allSelected = filtered.length > 0 && filtered.every(idx => batchSelected.has(idx));
+  batchSelectAll.classList.toggle('checked', allSelected);
+}
+
+function enterBatchMode(initialTrackIdx) {
+  batchMode = true;
+  batchSelected.clear();
+  closeAllRevealedItems();
+  listActionsEl.classList.add('batch-mode');
+  batchToolbar.classList.add('show');
+  if (initialTrackIdx !== undefined && initialTrackIdx !== null) {
+    batchSelected.add(initialTrackIdx);
+  }
+  updateTrackList();
+}
+
+function exitBatchMode() {
+  batchMode = false;
+  batchSelected.clear();
+  listActionsEl.classList.remove('batch-mode');
+  batchToolbar.classList.remove('show');
+  updateTrackList();
+}
+
+batchSelectAll.addEventListener('click', () => {
+  const filtered = getFilteredTrackIndices();
+  const allSelected = filtered.every(idx => batchSelected.has(idx));
+  if (allSelected) {
+    filtered.forEach(idx => batchSelected.delete(idx));
+  } else {
+    filtered.forEach(idx => batchSelected.add(idx));
+  }
+  updateTrackList();
+});
+
+async function showBatchCategorize() {
+  const count = batchSelected.size;
+  if (count === 0) return;
+
+  const catOptions = categories.map(c => ({
+    text: c.name,
+    value: c.id
+  }));
+  catOptions.unshift({ text: '取消', value: null, style: 'cancel' });
+
+  const result = await showModal({
+    title: '移动到分类',
+    bodyHTML: `将选中的 <strong style="color:var(--accent)">${count}</strong> 首曲目移动到分类：`,
+    buttons: catOptions
+  });
+
+  if (!result) return;
+
+  batchSelected.forEach(idx => {
+    if (tracks[idx]) tracks[idx].categoryId = result;
+  });
+
+  const catName = categories.find(c => c.id === result)?.name || '';
+  exitBatchMode();
+  showToast(`已移动 ${count} 首到「${catName}」`);
+}
+batchCategorizeBtn.addEventListener('click', showBatchCategorize);
+
+batchDeleteConfirm.addEventListener('click', async () => {
+  const count = batchSelected.size;
+  if (count === 0) return;
+
+  const confirmed = await showModal({
+    title: '批量删除',
+    bodyHTML: `确定删除选中的 <strong style="color:var(--delete-red)">${count}</strong> 首曲目吗？`,
+    buttons: [
+      { text: '取消', value: false, style: 'cancel' },
+      { text: '删除', value: true, style: 'danger' }
+    ]
+  });
+  if (!confirmed) return;
+
+  const toDelete = Array.from(batchSelected).sort((a, b) => b - a);
+  toDelete.forEach(idx => {
+    const track = tracks[idx];
+    if (track && track.src.startsWith('blob:')) URL.revokeObjectURL(track.src);
+    tracks.splice(idx, 1);
+  });
+
+  batchSelected.clear();
+
+  if (tracks.length === 0) {
+    pause();
+    currentMedia.src = '';
+    labelText.textContent = '音轨';
+    currentIndex = 0;
+  } else {
+    if (toDelete.includes(currentIndex) || currentIndex >= tracks.length) {
+      currentIndex = 0;
+      loadTrack(0);
+      if (isPlaying) play();
+    } else {
+      let adjust = toDelete.filter(idx => idx < currentIndex).length;
+      currentIndex -= adjust;
+    }
+  }
+
+  exitBatchMode();
+  showToast(`已删除 ${count} 首曲目`);
+});
+
 function selectTrack(index) {
   loadTrack(index);
   play();
@@ -2988,8 +3406,44 @@ loadTrack(0);
 renderCategoryBar();
 updateTrackList();
 
-// ==================== Service Worker Registration ====================
-if ('serviceWorker' in navigator) {
+// ==================== Cordova Integration ====================
+function setupCordovaBridge() {
+  if (!window.YinguMusic) return;
+
+  // 注册通知栏控制回调
+  YinguMusic.onControl(function(action) {
+    switch (action) {
+      case 'toggle': togglePlay(); break;
+      case 'next': nextTrack(); break;
+      case 'prev': prevTrack(); break;
+      case 'play': play(); break;
+      case 'pause': pause(); break;
+    }
+  });
+
+  // 拦截 play/pause/loadTrack 通知 Native 更新通知栏
+  var _origPlay = play, _origPause = pause, _origLoad = loadTrack;
+  function notifyNative() {
+    try {
+      var name = tracks[currentIndex] ? tracks[currentIndex].name : '音轨';
+      var idx = currentIndex + 1, total = tracks.length;
+      YinguMusic.updatePlayback(isPlaying, name, idx, total);
+    } catch (e) {}
+  }
+  play = function() { _origPlay(); setTimeout(notifyNative, 100); };
+  pause = function() { _origPause(); setTimeout(notifyNative, 100); };
+  loadTrack = function(i) { _origLoad(i); setTimeout(notifyNative, 200); };
+
+  // 初始通知
+  setTimeout(notifyNative, 1000);
+}
+
+if (window.cordova) {
+  document.addEventListener('deviceready', function() {
+    setupCordovaBridge();
+  }, false);
+} else if ('serviceWorker' in navigator) {
+  // Web/PWA 模式 - 注册 Service Worker
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('sw.js').then(reg => {
       console.log('音轨 Service Worker registered');
