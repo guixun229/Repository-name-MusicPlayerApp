@@ -1,0 +1,6 @@
+{
+  "appId": "com.yourcompany.musicplayer",
+  "appName": "音轨",
+  "webDir": "www",
+  "bundledWebRuntime": false
+}
