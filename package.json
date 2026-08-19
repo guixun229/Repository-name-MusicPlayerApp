@@ -1,6 +1,6 @@
 {
   "name": "music-player-app",
-  "version": "1.0.0",
+  "version": "1.2.1",
   "private": true,
   "scripts": {
     "build": "cp -r www/* android/app/src/main/assets/public/ || true"
