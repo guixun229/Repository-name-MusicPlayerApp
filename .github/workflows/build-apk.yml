@@ -18,6 +18,8 @@ jobs:
       - name: Add Android platform          # ← 新增
         run: npx cap add android
       - name: Sync Capacitor (Android)
+      - name: Generate Android assets
+        run: npx capacitor-assets generate --android
         run: npx cap sync android
       - name: Set up Java
         uses: actions/setup-java@v4
