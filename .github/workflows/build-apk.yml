@@ -17,9 +17,9 @@ jobs:
         run: npm install
       - name: Add Android platform          # ← 新增
         run: npx cap add android
-      - name: Sync Capacitor (Android)
       - name: Generate Android assets
         run: npx capacitor-assets generate --android
+      - name: Sync Capacitor (Android)
         run: npx cap sync android
       - name: Set up Java
         uses: actions/setup-java@v4
@@ -27,7 +27,8 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+        uses:
+android-actions/setup-android@v3
         with:
           sdk-packages: "platforms;android-33 build-tools;33.0.0"
       - name: Build APK
