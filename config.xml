@@ -1,6 +1,5 @@
 <?xml version='1.0' encoding='utf-8'?>
 <widget id="com.yingu.player" version="1.2.1" xmlns="http://www.w3.org/ns/widgets" xmlns:cdv="http://cordova.apache.org/ns/1.0" xmlns:android="http://schemas.android.com/apk/res/android">
-
     <name>音轨</name>
     <description>音轨 - 极简唱片音乐播放器</description>
     <author email="yingu@example.com" href="http://yingu.app">音轨</author>
@@ -47,11 +46,7 @@
             <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
         </config-file>
 
-        <!-- 网络安全配置 -->
-        <config-file target="app/src/main/AndroidManifest.xml" parent="/manifest/application">
-            <attribute name="android:usesCleartextTraffic" value="true" />
-            <attribute name="android:hardwareAccelerated" value="true" />
-        </config-file>
+        <preference name="android-hardwareAccelerated" value="true" />
     </platform>
 
     <!-- 本地插件通过 package.json 中的 cordova.plugins 配置 -->
