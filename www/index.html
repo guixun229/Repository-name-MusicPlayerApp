@@ -1471,9 +1471,9 @@ input[type="file"] { display: none; }
   </div>
 </div>
 
-<!-- Hidden media elements -->
-<audio id="audioPlayer" preload="metadata" playsinline></audio>
-<video id="videoPlayer" preload="metadata" playsinline webkit-playsinline></video>
+<!-- Hidden media elements - 添加 crossorigin 和 webkit-playsinline 确保后台播放 -->
+<audio id="audioPlayer" preload="auto" playsinline webkit-playsinline crossorigin="anonymous"></audio>
+<video id="videoPlayer" preload="auto" playsinline webkit-playsinline crossorigin="anonymous"></video>
 
 <!-- File inputs -->
 <input type="file" id="audioInput" accept="audio/*" multiple>
@@ -1507,6 +1507,369 @@ let currentIndex = 0;
 let isPlaying = false;
 let playMode = 'sequence';
 let currentMedia = null;
+
+// ==================== 数据持久化 (文件 + IndexedDB + localStorage) ====================
+// 确保退出软件、息屏、切后台后数据不丢失，只有卸载才会清除
+// 三重存储：Cordova File API（主） → IndexedDB（音频文件） → localStorage（备份）
+let _db = null;
+const DB_NAME = 'yingu_player_db';
+const DB_STORE = 'files';
+const LS_KEY = 'yingu_player_data';
+const DATA_FILE = 'yingu_player_data.json';
+
+// 打开 IndexedDB
+function openDB() {
+  return new Promise((resolve, reject) => {
+    try {
+      const req = indexedDB.open(DB_NAME, 1);
+      req.onupgradeneeded = e => {
+        const db = e.target.result;
+        if (!db.objectStoreNames.contains(DB_STORE)) {
+          db.createObjectStore(DB_STORE);
+        }
+      };
+      req.onsuccess = e => { _db = e.target.result; resolve(_db); };
+      req.onerror = e => { console.warn('[持久化] IndexedDB 打开失败，仅用文件存储'); resolve(null); };
+    } catch(e) {
+      console.warn('[持久化] IndexedDB 不可用:', e);
+      resolve(null);
+    }
+  });
+}
+
+// ==================== 文件存储 (最可靠) ====================
+function saveToFile(jsonStr) {
+  return new Promise((resolve) => {
+    if (!window.cordova || !window.resolveLocalFileSystemURL) {
+      // 非 Cordova 环境，用 localStorage 兜底
+      try { localStorage.setItem(LS_KEY, jsonStr); } catch(e) {}
+      resolve();
+      return;
+    }
+    const path = cordova.file.dataDirectory || cordova.file.filesDirectory || cordova.file.applicationStorageDirectory;
+    if (!path) { try { localStorage.setItem(LS_KEY, jsonStr); } catch(e) {} resolve(); return; }
+    window.resolveLocalFileSystemURL(path, function(dirEntry) {
+      dirEntry.getFile(DATA_FILE, { create: true }, function(fileEntry) {
+        fileEntry.createWriter(function(writer) {
+          writer.onwriteend = function() { resolve(); };
+          writer.onerror = function() {
+            try { localStorage.setItem(LS_KEY, jsonStr); } catch(e) {}
+            resolve();
+          };
+          writer.write(jsonStr);
+        }, function() {
+          try { localStorage.setItem(LS_KEY, jsonStr); } catch(e) {}
+          resolve();
+        });
+      }, function() {
+        try { localStorage.setItem(LS_KEY, jsonStr); } catch(e) {}
+        resolve();
+      });
+    }, function() {
+      try { localStorage.setItem(LS_KEY, jsonStr); } catch(e) {}
+      resolve();
+    });
+  });
+}
+
+function loadFromFile() {
+  return new Promise((resolve) => {
+    if (!window.cordova || !window.resolveLocalFileSystemURL) {
+      try { resolve(localStorage.getItem(LS_KEY)); } catch(e) { resolve(null); }
+      return;
+    }
+    const path = cordova.file.dataDirectory || cordova.file.filesDirectory || cordova.file.applicationStorageDirectory;
+    if (!path) { try { resolve(localStorage.getItem(LS_KEY)); } catch(e) { resolve(null); } return; }
+    window.resolveLocalFileSystemURL(path, function(dirEntry) {
+      dirEntry.getFile(DATA_FILE, {}, function(fileEntry) {
+        fileEntry.file(function(file) {
+          const reader = new FileReader();
+          reader.onloadend = function() {
+            if (this.result) { resolve(this.result); }
+            else { try { resolve(localStorage.getItem(LS_KEY)); } catch(e) { resolve(null); } }
+          };
+          reader.onerror = function() {
+            try { resolve(localStorage.getItem(LS_KEY)); } catch(e) { resolve(null); }
+          };
+          reader.readAsText(file);
+        }, function() {
+          try { resolve(localStorage.getItem(LS_KEY)); } catch(e) { resolve(null); }
+        });
+      }, function() {
+        // 文件不存在，尝试 localStorage
+        try { resolve(localStorage.getItem(LS_KEY)); } catch(e) { resolve(null); }
+      });
+    }, function() {
+      try { resolve(localStorage.getItem(LS_KEY)); } catch(e) { resolve(null); }
+    });
+  });
+}
+
+// 存储文件到 IndexedDB
+function dbPut(key, blob) {
+  return new Promise((resolve, reject) => {
+    if (!_db) return reject('DB not open');
+    const tx = _db.transaction(DB_STORE, 'readwrite');
+    tx.objectStore(DB_STORE).put(blob, key);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+// 从 IndexedDB 读取文件
+function dbGet(key) {
+  return new Promise((resolve, reject) => {
+    if (!_db) return reject('DB not open');
+    const tx = _db.transaction(DB_STORE, 'readonly');
+    const req = tx.objectStore(DB_STORE).get(key);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+// 从 IndexedDB 删除文件
+function dbDelete(key) {
+  return new Promise((resolve, reject) => {
+    if (!_db) return reject('DB not open');
+    const tx = _db.transaction(DB_STORE, 'readwrite');
+    tx.objectStore(DB_STORE).delete(key);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+// 防抖保存（用于文件/localStorage，较慢）
+let _saveTimer = null;
+// 立即保存标记
+let _deviceReady = false;
+
+function saveAllData() {
+  // 立即保存到 SharedPreferences（同步，最快最可靠）
+  _saveToNative();
+  // 防抖保存到文件/localStorage（较慢，作为备份）
+  if (_saveTimer) clearTimeout(_saveTimer);
+  _saveTimer = setTimeout(_doSave, 500);
+}
+
+// 立即保存到 Android SharedPreferences（同步调用，不等回调）
+function _saveToNative() {
+  try {
+    if (!_deviceReady || !window.YinguMusic || !window.YinguMusic.saveData) return;
+    const data = _serializeData();
+    const jsonStr = JSON.stringify(data);
+    YinguMusic.saveData(jsonStr);
+  } catch(e) {
+    console.warn('[持久化] Native即时保存失败:', e);
+  }
+}
+
+// 序列化数据（提取公共逻辑）
+function _serializeData() {
+  const tracksData = tracks.map(t => {
+    const copy = { ...t };
+    if (copy.src && copy.src.startsWith('blob:')) {
+      if (copy._fileKey) {
+        copy.src = 'idb:' + copy._fileKey;
+      }
+      delete copy._fileKey;
+    }
+    return copy;
+  });
+
+  // 🔧 FIX: 统一处理图片序列化，优先使用 _fileKey
+  function serializeImageList(arr) {
+    return arr.map((item, i) => {
+      if (typeof item === 'object' && item !== null) {
+        if (item._fileKey) return 'idb:' + item._fileKey;
+        if (item.url && item.url.startsWith('blob:')) {
+          return 'idb:' + (item._fileKey || 'img-' + i + '-' + Date.now());
+        }
+        return item.url || '';
+      }
+      if (typeof item === 'string') {
+        if (item.startsWith('blob:')) {
+          return ''; // blob URL 不能跨会话，丢弃
+        }
+        return item;
+      }
+      return '';
+    });
+  }
+
+  const settingsData = {
+    bgColor: settings.bgColor,
+    bgOpacity: settings.bgOpacity,
+    recordColor: settings.recordColor,
+    recordOpacity: settings.recordOpacity,
+    labelColor: settings.labelColor,
+    labelOpacity: settings.labelOpacity,
+    bgImageIndex: settings.bgImageIndex,
+    recordImageIndex: settings.recordImageIndex,
+    labelImageIndex: settings.labelImageIndex,
+    bgOpacityImage: settings.bgOpacityImage,
+    recordOpacityImage: settings.recordOpacityImage,
+    labelOpacityImage: settings.labelOpacityImage,
+    bgImages: serializeImageList(settings.bgImages),
+    recordImages: serializeImageList(settings.recordImages),
+    labelImages: serializeImageList(settings.labelImages)
+  };
+
+  return {
+    tracks: tracksData,
+    categories: categories,
+    nextTrackId: nextTrackId,
+    nextCategoryId: nextCategoryId,
+    currentCategoryId: currentCategoryId,
+    currentIndex: currentIndex,
+    playMode: playMode,
+    settings: settingsData,
+    version: 2
+  };
+}
+
+function _doSave() {
+  try {
+    const data = _serializeData();
+    const jsonStr = JSON.stringify(data);
+    localStorage.setItem(LS_KEY, jsonStr);
+    // 写入文件（异步备份）
+    saveToFile(jsonStr);
+    // 🔧 FIX: 移除重复的 Native 调用，避免重复写入（由 _saveToNative 负责）
+    console.log('[持久化] 数据已保存:', data.tracks.length, '首曲目');
+  } catch (e) {
+    console.error('[持久化] 保存失败:', e);
+  }
+}
+
+// 加载持久化数据
+async function loadAllData() {
+  try {
+    // 1. 优先从 Android SharedPreferences 加载（最可靠）
+    let raw = null;
+    if (window.YinguMusic && window.YinguMusic.loadData) {
+      try {
+        raw = await new Promise((resolve) => {
+          YinguMusic.loadData(function(result) {
+            resolve(result && result.length > 0 ? result : null);
+          }, function() { resolve(null); });
+        });
+        if (raw) console.log('[持久化] 从 SharedPreferences 加载成功');
+      } catch(e) { console.warn('[持久化] SharedPreferences 加载失败:', e); }
+    }
+    // 2. 回退到文件
+    if (!raw) {
+      raw = await loadFromFile();
+      if (raw) console.log('[持久化] 从文件加载成功');
+    }
+    // 3. 回退到 localStorage
+    if (!raw) {
+      raw = localStorage.getItem(LS_KEY);
+      if (raw) console.log('[持久化] 从 localStorage 加载成功');
+    }
+    if (!raw) {
+      console.log('[持久化] 无历史数据，使用默认');
+      return false;
+    }
+
+    const data = JSON.parse(raw);
+    if (!data || !data.tracks) return false;
+
+    // 恢复分类
+    if (data.categories && Array.isArray(data.categories)) {
+      categories = data.categories;
+    }
+    if (data.nextTrackId) nextTrackId = data.nextTrackId;
+    if (data.nextCategoryId) nextCategoryId = data.nextCategoryId;
+    if (data.currentCategoryId) currentCategoryId = data.currentCategoryId;
+    if (data.playMode) playMode = data.playMode;
+
+    // 恢复 tracks，把 idb: 引用转回 blob URL
+    tracks = [];
+    for (const t of data.tracks) {
+      const track = { ...t };
+      if (track.src && track.src.startsWith('idb:')) {
+        const fileKey = track.src.substring(4);
+        try {
+          const blob = _db ? await dbGet(fileKey) : null;
+          if (blob) {
+            track.src = URL.createObjectURL(blob);
+            track._fileKey = fileKey;
+          } else {
+            console.warn('[持久化] 音频文件未找到:', fileKey, '（曲目信息已保留）');
+            track.src = ''; // 音频文件丢失，但曲目信息保留
+            track._fileKey = fileKey; // 保留 key，方便后续重新关联
+          }
+        } catch (e) {
+          console.warn('[持久化] 读取音频文件失败:', fileKey, '（曲目信息已保留）');
+          track.src = '';
+          track._fileKey = fileKey;
+        }
+      }
+      tracks.push(track);
+    }
+
+    // 恢复 settings
+    if (data.settings) {
+      const s = data.settings;
+      if (s.bgColor) settings.bgColor = s.bgColor;
+      if (s.bgOpacity !== undefined) settings.bgOpacity = s.bgOpacity;
+      if (s.recordColor) settings.recordColor = s.recordColor;
+      if (s.recordOpacity !== undefined) settings.recordOpacity = s.recordOpacity;
+      if (s.labelColor) settings.labelColor = s.labelColor;
+      if (s.labelOpacity !== undefined) settings.labelOpacity = s.labelOpacity;
+      if (s.bgImageIndex !== undefined) settings.bgImageIndex = s.bgImageIndex;
+      if (s.recordImageIndex !== undefined) settings.recordImageIndex = s.recordImageIndex;
+      if (s.labelImageIndex !== undefined) settings.labelImageIndex = s.labelImageIndex;
+      if (s.bgOpacityImage !== undefined) settings.bgOpacityImage = s.bgOpacityImage;
+      if (s.recordOpacityImage !== undefined) settings.recordOpacityImage = s.recordOpacityImage;
+      if (s.labelOpacityImage !== undefined) settings.labelOpacityImage = s.labelOpacityImage;
+
+      // 🔧 FIX: 恢复图片，跳过无效引用
+      async function restoreImageList(refs) {
+        const result = [];
+        for (const ref of refs) {
+          if (typeof ref === 'string' && ref.startsWith('idb:')) {
+            try {
+              const blob = await dbGet(ref.substring(4));
+              if (blob) {
+                result.push({ url: URL.createObjectURL(blob), _fileKey: ref.substring(4) });
+              } else {
+                // 🔧 FIX: 文件丢失，跳过，不添加空对象
+                console.warn('[持久化] 图片文件未找到:', ref);
+              }
+            } catch (e) {
+              console.warn('[持久化] 读取图片失败:', ref);
+            }
+          } else if (typeof ref === 'string' && ref.length > 0 && !ref.startsWith('blob:')) {
+            // 网络图片或本地路径，直接保留
+            result.push(ref);
+          }
+        }
+        return result;
+      }
+
+      if (s.bgImages) settings.bgImages = await restoreImageList(s.bgImages);
+      if (s.recordImages) settings.recordImages = await restoreImageList(s.recordImages);
+      if (s.labelImages) settings.labelImages = await restoreImageList(s.labelImages);
+
+      // 修正索引越界
+      if (settings.bgImageIndex >= settings.bgImages.length) settings.bgImageIndex = settings.bgImages.length - 1;
+      if (settings.recordImageIndex >= settings.recordImages.length) settings.recordImageIndex = settings.recordImages.length - 1;
+      if (settings.labelImageIndex >= settings.labelImages.length) settings.labelImageIndex = settings.labelImages.length - 1;
+    }
+
+    // 恢复播放位置（不自动播放，只恢复索引）
+    if (data.currentIndex !== undefined && data.currentIndex < tracks.length) {
+      currentIndex = data.currentIndex;
+    }
+
+    console.log('[持久化] 数据已恢复:', tracks.length, '首曲目');
+    return true;
+  } catch (e) {
+    console.error('[持久化] 加载失败:', e);
+    return false;
+  }
+}
 
 // Batch mode state
 let batchMode = false;
@@ -1633,9 +1996,18 @@ function applySettings() {
 
   // Background image with opacity
   if (settings.bgImages.length > 0 && settings.bgImageIndex >= 0 && settings.bgImageIndex < settings.bgImages.length) {
-    const img = settings.bgImages[settings.bgImageIndex];
-    const imgOpacity = settings.bgOpacityImage;
-    playerView.style.background = `linear-gradient(rgba(0,0,0,${1 - imgOpacity}), rgba(0,0,0,${1 - imgOpacity + 0.1})), url('${img}') center / cover no-repeat`;
+    const imgItem = settings.bgImages[settings.bgImageIndex];
+    const imgUrl = typeof imgItem === 'string' ? imgItem : (imgItem && imgItem.url ? imgItem.url : '');
+    if (imgUrl) {
+      const imgOpacity = settings.bgOpacityImage;
+      playerView.style.background = `linear-gradient(rgba(0,0,0,${1 - imgOpacity}), rgba(0,0,0,${1 - imgOpacity + 0.1})), url('${imgUrl}') center / cover no-repeat`;
+    } else {
+      // 图片 URL 无效，回退到纯色
+      const bgAlpha = settings.bgOpacity;
+      const bgColorRgba = hexToRgba(settings.bgColor, bgAlpha);
+      const bgMidRgba = hexToRgba(adjustColor(settings.bgColor, 16), bgAlpha);
+      playerView.style.background = `radial-gradient(ellipse at 50% 45%, ${bgMidRgba} 0%, ${bgColorRgba} 50%, rgba(5,5,5,${bgAlpha}) 100%)`;
+    }
   } else {
     // Background color with opacity
     const bgAlpha = settings.bgOpacity;
@@ -1654,9 +2026,15 @@ function applySettings() {
   const recordImgEl = document.getElementById('recordImageOverlay');
   if (recordImgEl) {
     if (settings.recordImages.length > 0 && settings.recordImageIndex >= 0 && settings.recordImageIndex < settings.recordImages.length) {
-      recordImgEl.style.backgroundImage = `url('${settings.recordImages[settings.recordImageIndex]}')`;
-      recordImgEl.style.opacity = settings.recordOpacityImage;
-      recordImgEl.style.display = 'block';
+      const recItem = settings.recordImages[settings.recordImageIndex];
+      const recUrl = typeof recItem === 'string' ? recItem : (recItem && recItem.url ? recItem.url : '');
+      if (recUrl) {
+        recordImgEl.style.backgroundImage = `url('${recUrl}')`;
+        recordImgEl.style.opacity = settings.recordOpacityImage;
+        recordImgEl.style.display = 'block';
+      } else {
+        recordImgEl.style.display = 'none';
+      }
     } else {
       recordImgEl.style.display = 'none';
     }
@@ -1666,9 +2044,15 @@ function applySettings() {
   const labelImgEl = document.getElementById('labelImageOverlay');
   if (labelImgEl) {
     if (settings.labelImages.length > 0 && settings.labelImageIndex >= 0 && settings.labelImageIndex < settings.labelImages.length) {
-      labelImgEl.style.backgroundImage = `url('${settings.labelImages[settings.labelImageIndex]}')`;
-      labelImgEl.style.opacity = settings.labelOpacityImage;
-      labelImgEl.style.display = 'block';
+      const lblItem = settings.labelImages[settings.labelImageIndex];
+      const lblUrl = typeof lblItem === 'string' ? lblItem : (lblItem && lblItem.url ? lblItem.url : '');
+      if (lblUrl) {
+        labelImgEl.style.backgroundImage = `url('${lblUrl}')`;
+        labelImgEl.style.opacity = settings.labelOpacityImage;
+        labelImgEl.style.display = 'block';
+      } else {
+        labelImgEl.style.display = 'none';
+      }
     } else {
       labelImgEl.style.display = 'none';
     }
@@ -1710,7 +2094,17 @@ function renderImageGrid(gridId, images, indexKey, inputId, labelName) {
   };
   const opacityRow = document.getElementById(opacityRowMap[gridId]);
 
-  images.forEach((imgUrl, idx) => {
+  // 🔧 FIX: 过滤掉无效的图片项（空字符串或没有 url 的对象）
+  const validImages = images.filter(item => {
+    if (typeof item === 'string') return item.length > 0 && !item.startsWith('blob:');
+    if (typeof item === 'object' && item !== null) {
+      return item.url && item.url.length > 0 && !item.url.startsWith('blob:');
+    }
+    return false;
+  });
+
+  validImages.forEach((imgItem, idx) => {
+    const imgUrl = typeof imgItem === 'string' ? imgItem : imgItem.url;
     const item = document.createElement('div');
     item.className = 'bg-image-preview' + (idx === settings[indexKey] ? ' selected' : '');
     item.style.backgroundImage = `url('${imgUrl}')`;
@@ -1735,6 +2129,7 @@ function renderImageGrid(gridId, images, indexKey, inputId, labelName) {
         settings[indexKey] = images.length - 1;
       }
       applySettings();
+      saveAllData();
       showToast('图片已移除');
     });
     item.appendChild(removeMini);
@@ -1742,6 +2137,7 @@ function renderImageGrid(gridId, images, indexKey, inputId, labelName) {
     item.addEventListener('click', () => {
       settings[indexKey] = idx;
       applySettings();
+      saveAllData();
     });
 
     grid.appendChild(item);
@@ -1761,7 +2157,7 @@ function renderImageGrid(gridId, images, indexKey, inputId, labelName) {
 
   // Show/hide opacity slider
   if (opacityRow) {
-    opacityRow.style.display = (images.length > 0) ? '' : 'none';
+    opacityRow.style.display = (validImages.length > 0) ? '' : 'none';
   }
 }
 
@@ -1882,6 +2278,7 @@ function generateArtwork() {
 let wakeLock = null;
 let silentAudioCtx = null;
 let silentSource = null;
+let keepAliveTimer = null;
 
 // 创建一个静音的 Web Audio 振荡器，防止浏览器在后台时暂停音频
 function startSilentKeepAlive() {
@@ -1917,6 +2314,34 @@ function stopSilentKeepAlive() {
   }
 }
 
+// 启动定期保活定时器 - 每30秒通知 Native 服务保持播放
+function startKeepAliveTimer() {
+  stopKeepAliveTimer();
+  keepAliveTimer = setInterval(() => {
+    if (isPlaying && window.YinguMusic) {
+      try {
+        var name = tracks[currentIndex] ? tracks[currentIndex].name : '音轨';
+        YinguMusic.updatePlayback(true, name, currentIndex + 1, tracks.length);
+      } catch (e) {}
+    }
+    // 恢复 AudioContext（WebView 后台可能挂起）
+    if (silentAudioCtx && silentAudioCtx.state === 'suspended') {
+      silentAudioCtx.resume();
+    }
+    // 确保音频在播放
+    if (isPlaying && currentMedia && currentMedia.paused) {
+      currentMedia.play().catch(function() {});
+    }
+  }, 30000);
+}
+
+function stopKeepAliveTimer() {
+  if (keepAliveTimer) {
+    clearInterval(keepAliveTimer);
+    keepAliveTimer = null;
+  }
+}
+
 async function requestWakeLock() {
   try {
     if ('wakeLock' in navigator) {
@@ -1939,11 +2364,56 @@ function releaseWakeLock() {
 
 // 页面可见性变化 - 恢复 Wake Lock 和静音保活
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible' && isPlaying) {
+  if (document.visibilityState === 'hidden') {
+    // 页面隐藏时立即保存数据（先 Native 同步，再文件）
+    _saveToNative();
+    _doSave();
+  } else if (document.visibilityState === 'visible' && isPlaying) {
     requestWakeLock();
     startSilentKeepAlive();
+    // 恢复后确保音频继续播放
+    if (currentMedia && currentMedia.paused) {
+      currentMedia.play().catch(function() {});
+    }
   }
 });
+
+// beforeunload - 最后机会保存数据
+window.addEventListener('beforeunload', () => {
+  _saveToNative();
+  _doSave();
+});
+
+// Cordova 生命周期 - pause 事件（息屏/切后台时触发）
+// 在 Cordova WebView 中，这个事件比 visibilitychange 更可靠
+if (window.cordova) {
+  document.addEventListener('pause', () => {
+    // 息屏/切后台时：立即保存数据（先 Native 同步保存，防被杀丢数据）
+    _saveToNative();
+    _doSave();
+    // 通知 Native 服务
+    if (isPlaying && window.YinguMusic) {
+      try {
+        var name = tracks[currentIndex] ? tracks[currentIndex].name : '音轨';
+        YinguMusic.updatePlayback(true, name, currentIndex + 1, tracks.length);
+      } catch (e) {}
+    }
+    // 保持静音保活运行（不停止）
+    // WakeLock 在 WebView 中会被自动释放，但 Native 服务的 WakeLock 会保持
+  }, false);
+
+  document.addEventListener('resume', () => {
+    // 从后台恢复时：重新获取 WakeLock、恢复 AudioContext
+    if (isPlaying) {
+      requestWakeLock();
+      startSilentKeepAlive();
+      if (currentMedia && currentMedia.paused) {
+        currentMedia.play().catch(function() {});
+      }
+      updateMediaSession();
+    }
+  }, false);
+}
 
 // 页面生命周期 - 处理 freeze/resume 事件
 document.addEventListener('freeze', () => {
@@ -1963,8 +2433,10 @@ document.addEventListener('resume', () => {
   }
 });
 
-// pagehide - 确保后台播放状态正确
+// pagehide - 确保后台播放状态正确，并保存数据
 window.addEventListener('pagehide', (event) => {
+  _saveToNative();
+  _doSave();
   if (isPlaying) {
     // 确保浏览器知道我们正在播放，应该在后台继续
     if ('mediaSession' in navigator) {
@@ -2019,7 +2491,9 @@ function updateMediaSession() {
     }
     // Use record image if available
     if (settings.recordImages.length > 0 && settings.recordImageIndex >= 0) {
-      artwork.unshift({ src: settings.recordImages[settings.recordImageIndex], sizes: '512x512', type: 'image/jpeg' });
+      const recItem = settings.recordImages[settings.recordImageIndex];
+      const recUrl = typeof recItem === 'string' ? recItem : (recItem && recItem.url ? recItem.url : '');
+      if (recUrl) artwork.unshift({ src: recUrl, sizes: '512x512', type: 'image/jpeg' });
     }
     navigator.mediaSession.metadata = new MediaMetadata({
       title: track.name,
@@ -2078,16 +2552,52 @@ function loadTrack(index) {
     prevMedia.pause();
     prevMedia.currentTime = 0;
   }
-  currentMedia.src = track.src;
-  currentMedia.load();
+
+  // 🔧 FIX: 如果 src 为空，尝试从 IndexedDB 重新加载
+  if (!track.src && track._fileKey) {
+    (async () => {
+      try {
+        const blob = _db ? await dbGet(track._fileKey) : null;
+        if (blob) {
+          track.src = URL.createObjectURL(blob);
+          currentMedia.src = track.src;
+          currentMedia.load();
+          labelText.textContent = track.name;
+          updateTrackList();
+          updateMediaSession();
+          updateProgress();
+          saveAllData();
+          showToast('已恢复音频文件');
+        } else {
+          showToast('音频文件已丢失');
+        }
+      } catch (e) {
+        showToast('加载音频失败');
+      }
+    })();
+    return;
+  }
+
+  currentMedia.src = track.src || '';
+  if (currentMedia.src) {
+    currentMedia.load();
+  } else {
+    showToast('音频文件不可用');
+  }
   labelText.textContent = track.name;
   updateTrackList();
   updateMediaSession();
   updateProgress();
+  saveAllData(); // 保存当前播放位置
 }
 
 function play() {
   if (tracks.length === 0) { showToast('请先添加曲目'); return; }
+  const track = tracks[currentIndex];
+  if (!track.src && track._fileKey) {
+    loadTrack(currentIndex); // 尝试重新加载
+    return;
+  }
   isPlaying = true;
   targetSpeed = PLAY_SPEED;
   startAnimation();
@@ -2097,6 +2607,8 @@ function play() {
   requestWakeLock();
   // 启动静音保活（防止浏览器在后台挂起音频上下文）
   startSilentKeepAlive();
+  // 启动定期保活定时器（每30秒检查并恢复播放）
+  startKeepAliveTimer();
   // 设置播放状态
   if ('mediaSession' in navigator) {
     navigator.mediaSession.playbackState = 'playing';
@@ -2114,6 +2626,8 @@ function pause() {
   targetSpeed = 0;
   startAnimation();
   releaseWakeLock();
+  // 停止定期保活定时器
+  stopKeepAliveTimer();
   // 注意：暂停时不停止静音保活，避免播放状态切换导致后台音频中断
   // 仅在完全停止时才停止
   currentMedia.pause();
@@ -2189,6 +2703,7 @@ function togglePlayMode() {
     showToast('顺序播放');
   }
   updateTrackList();
+  saveAllData();
 }
 
 // ==================== Record Gestures (Tap + Swipe) ====================
@@ -2417,15 +2932,18 @@ document.getElementById('dataToggle').addEventListener('click', () => {
 });
 
 // Background image upload
-document.getElementById('bgImageInput').addEventListener('change', e => {
+document.getElementById('bgImageInput').addEventListener('change', async e => {
   const files = Array.from(e.target.files);
   if (files.length === 0) return;
-  files.forEach(file => {
+  for (const file of files) {
     const url = URL.createObjectURL(file);
-    settings.bgImages.push(url);
-  });
+    const fileKey = 'img-bg-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+    try { await dbPut(fileKey, file); } catch(err) { console.warn('IndexedDB:', err); }
+    settings.bgImages.push({ url, _fileKey: fileKey });
+  }
   settings.bgImageIndex = settings.bgImages.length - 1;
   applySettings();
+  saveAllData();
   showToast(`已添加 ${files.length} 张图片`);
   e.target.value = '';
 });
@@ -2435,50 +2953,60 @@ document.getElementById('bgOpacitySlider').addEventListener('input', e => {
   settings.bgOpacity = parseInt(e.target.value) / 100;
   document.getElementById('bgOpacityValue').textContent = e.target.value + '%';
   applySettings();
+  saveAllData();
 });
 
 document.getElementById('recordOpacitySlider').addEventListener('input', e => {
   settings.recordOpacity = parseInt(e.target.value) / 100;
   document.getElementById('recordOpacityValue').textContent = e.target.value + '%';
   applySettings();
+  saveAllData();
 });
 
 document.getElementById('labelOpacitySlider').addEventListener('input', e => {
   settings.labelOpacity = parseInt(e.target.value) / 100;
   document.getElementById('labelOpacityValue').textContent = e.target.value + '%';
   applySettings();
+  saveAllData();
 });
 
 document.getElementById('opacitySlider').addEventListener('input', e => {
   settings.bgOpacityImage = parseInt(e.target.value) / 100;
   document.getElementById('opacityValue').textContent = e.target.value + '%';
   applySettings();
+  saveAllData();
 });
 
 // Record image upload
-document.getElementById('recordImageInput').addEventListener('change', e => {
+document.getElementById('recordImageInput').addEventListener('change', async e => {
   const files = Array.from(e.target.files);
   if (files.length === 0) return;
-  files.forEach(file => {
+  for (const file of files) {
     const url = URL.createObjectURL(file);
-    settings.recordImages.push(url);
-  });
+    const fileKey = 'img-rec-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+    try { await dbPut(fileKey, file); } catch(err) { console.warn('IndexedDB:', err); }
+    settings.recordImages.push({ url, _fileKey: fileKey });
+  }
   settings.recordImageIndex = settings.recordImages.length - 1;
   applySettings();
+  saveAllData();
   showToast(`已添加 ${files.length} 张唱片图片`);
   e.target.value = '';
 });
 
 // Label image upload
-document.getElementById('labelImageInput').addEventListener('change', e => {
+document.getElementById('labelImageInput').addEventListener('change', async e => {
   const files = Array.from(e.target.files);
   if (files.length === 0) return;
-  files.forEach(file => {
+  for (const file of files) {
     const url = URL.createObjectURL(file);
-    settings.labelImages.push(url);
-  });
+    const fileKey = 'img-lbl-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+    try { await dbPut(fileKey, file); } catch(err) { console.warn('IndexedDB:', err); }
+    settings.labelImages.push({ url, _fileKey: fileKey });
+  }
   settings.labelImageIndex = settings.labelImages.length - 1;
   applySettings();
+  saveAllData();
   showToast(`已添加 ${files.length} 张标签图片`);
   e.target.value = '';
 });
@@ -2488,6 +3016,7 @@ document.getElementById('recordImgOpacitySlider').addEventListener('input', e =>
   settings.recordOpacityImage = parseInt(e.target.value) / 100;
   document.getElementById('recordImgOpacityValue').textContent = e.target.value + '%';
   applySettings();
+  saveAllData();
 });
 
 // Label image opacity slider
@@ -2495,6 +3024,7 @@ document.getElementById('labelImgOpacitySlider').addEventListener('input', e => 
   settings.labelOpacityImage = parseInt(e.target.value) / 100;
   document.getElementById('labelImgOpacityValue').textContent = e.target.value + '%';
   applySettings();
+  saveAllData();
 });
 
 // ==================== Import / Export ====================
@@ -2632,6 +3162,7 @@ document.getElementById('importInput').addEventListener('change', async e => {
 
     renderCategoryBar();
     updateTrackList();
+    saveAllData();
     showToast(`已导入 ${tracks.length} 首曲目`);
   } catch (err) {
     showToast('导入失败：文件格式错误');
@@ -2673,16 +3204,19 @@ function renderSettingsColors() {
     settings.bgColor = color;
     applySettings();
     renderSettingsColors();
+    saveAllData();
   });
   renderColorSwatches('recordSwatches', RECORD_PRESETS, settings.recordColor, color => {
     settings.recordColor = color;
     applySettings();
     renderSettingsColors();
+    saveAllData();
   });
   renderColorSwatches('labelSwatches', LABEL_PRESETS, settings.labelColor, color => {
     settings.labelColor = color;
     applySettings();
     renderSettingsColors();
+    saveAllData();
   });
 }
 
@@ -2700,6 +3234,7 @@ function renderCategoryBar() {
       currentCategoryId = cat.id;
       renderCategoryBar();
       updateTrackList();
+      saveAllData();
     });
     categoryBar.appendChild(pill);
   });
@@ -2725,6 +3260,7 @@ async function showCategoryAdd() {
   currentCategoryId = newId;
   renderCategoryBar();
   updateTrackList();
+  saveAllData();
   showToast('分类已添加');
 }
 
@@ -2757,6 +3293,7 @@ async function showCategoryEdit(catId) {
     if (currentCategoryId === catId) currentCategoryId = 'cat-0';
     renderCategoryBar();
     updateTrackList();
+    saveAllData();
     showToast('分类已删除');
     return;
   }
@@ -2764,6 +3301,7 @@ async function showCategoryEdit(catId) {
     cat.name = name;
     renderCategoryBar();
     updateTrackList();
+    saveAllData();
     showToast('分类已更新');
   }
 }
@@ -3084,6 +3622,7 @@ function attachTrackItemGestures(content, item) {
       }
       delete item.dataset.targetIndex;
       updateTrackList();
+      saveAllData();
     } else if (mode === 'batch') {
       // Batch mode already entered on long-press, nothing to do on touchend
     } else if (mode === 'scroll') {
@@ -3154,6 +3693,7 @@ async function showTrackEdit(trackIdx) {
     updateMediaSession();
   }
   showToast('曲目已更新');
+  saveAllData();
 }
 
 async function showTrackDeleteConfirm(trackIdx) {
@@ -3169,6 +3709,7 @@ async function showTrackDeleteConfirm(trackIdx) {
   });
   if (!confirmed) return;
   if (track.src.startsWith('blob:')) URL.revokeObjectURL(track.src);
+  if (track._fileKey) { dbDelete(track._fileKey).catch(()=>{}); }
   tracks.splice(trackIdx, 1);
   if (tracks.length === 0) {
     pause();
@@ -3185,6 +3726,7 @@ async function showTrackDeleteConfirm(trackIdx) {
     }
   }
   updateTrackList();
+  saveAllData();
   showToast('已删除');
 }
 
@@ -3265,6 +3807,7 @@ async function showBatchCategorize() {
   const catName = categories.find(c => c.id === result)?.name || '';
   exitBatchMode();
   showToast(`已移动 ${count} 首到「${catName}」`);
+  saveAllData();
 }
 batchCategorizeBtn.addEventListener('click', showBatchCategorize);
 
@@ -3286,6 +3829,7 @@ batchDeleteConfirm.addEventListener('click', async () => {
   toDelete.forEach(idx => {
     const track = tracks[idx];
     if (track && track.src.startsWith('blob:')) URL.revokeObjectURL(track.src);
+    if (track && track._fileKey) { dbDelete(track._fileKey).catch(()=>{}); }
     tracks.splice(idx, 1);
   });
 
@@ -3308,6 +3852,7 @@ batchDeleteConfirm.addEventListener('click', async () => {
   }
 
   exitBatchMode();
+  saveAllData();
   showToast(`已删除 ${count} 首曲目`);
 });
 
@@ -3318,28 +3863,34 @@ function selectTrack(index) {
 }
 
 // ==================== File Management ====================
-audioInput.addEventListener('change', e => {
+audioInput.addEventListener('change', async e => {
   const files = Array.from(e.target.files);
   if (files.length === 0) return;
-  files.forEach(file => {
+  for (const file of files) {
     const url = URL.createObjectURL(file);
     const name = file.name.replace(/\.[^/.]+$/, '');
-    tracks.push({ id: nextTrackId++, name, src: url, type: 'audio', categoryId: currentCategoryId });
-  });
+    const fileKey = 'audio-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+    try { await dbPut(fileKey, file); } catch(e) { console.warn('IndexedDB 存储失败:', e); }
+    tracks.push({ id: nextTrackId++, name, src: url, type: 'audio', categoryId: currentCategoryId, _fileKey: fileKey });
+  }
   updateTrackList();
+  saveAllData();
   showToast(`已添加 ${files.length} 首音频`);
   e.target.value = '';
 });
 
-videoInput.addEventListener('change', e => {
+videoInput.addEventListener('change', async e => {
   const files = Array.from(e.target.files);
   if (files.length === 0) return;
-  files.forEach(file => {
+  for (const file of files) {
     const url = URL.createObjectURL(file);
     const name = file.name.replace(/\.[^/.]+$/, '') + ' (视频音频)';
-    tracks.push({ id: nextTrackId++, name, src: url, type: 'video', categoryId: currentCategoryId });
-  });
+    const fileKey = 'video-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+    try { await dbPut(fileKey, file); } catch(e) { console.warn('IndexedDB 存储失败:', e); }
+    tracks.push({ id: nextTrackId++, name, src: url, type: 'video', categoryId: currentCategoryId, _fileKey: fileKey });
+  }
   updateTrackList();
+  saveAllData();
   showToast(`已提取 ${files.length} 个视频音频`);
   e.target.value = '';
 });
@@ -3406,6 +3957,93 @@ loadTrack(0);
 renderCategoryBar();
 updateTrackList();
 
+// ==================== App Init ====================
+// Cordova 设备就绪后加载数据
+function _onDeviceReady() {
+  _deviceReady = true;
+  console.log('[持久化] deviceready 已触发');
+  // 设置 Cordova 桥接
+  setupCordovaBridge();
+  // 加载数据
+  (async function() {
+    try {
+      await openDB();
+      const hasData = await loadAllData();
+      if (hasData) {
+        console.log('[持久化] 已恢复历史数据');
+      }
+    } catch (e) {
+      console.warn('[持久化] 初始化失败:', e);
+    }
+    applySettings();
+    renderCategoryBar();
+    renderSettingsColors();
+    if (tracks.length > 0 && currentIndex < tracks.length) {
+      loadTrack(currentIndex);
+    } else if (tracks.length > 0) {
+      currentIndex = 0;
+      loadTrack(0);
+    }
+    updateTrackList();
+  })();
+}
+
+if (window.cordova) {
+  // 检查 deviceready 是否已经触发
+  if (typeof cordova !== 'undefined' && cordova.fired) {
+    _onDeviceReady();
+  } else {
+    document.addEventListener('deviceready', _onDeviceReady, false);
+    // 超时兜底：3秒后无论如何都继续
+    setTimeout(function() {
+      if (!_deviceReady) {
+        console.warn('[持久化] deviceready 超时，强制加载');
+        _deviceReady = true;
+        (async function() {
+          try {
+            await openDB();
+              const hasData = await loadAllData();
+            if (hasData) console.log('[持久化] 超时后恢复数据');
+          } catch(e) {
+            console.warn('[持久化] 超时加载失败:', e);
+          }
+          applySettings();
+          renderCategoryBar();
+          renderSettingsColors();
+          if (tracks.length > 0 && currentIndex < tracks.length) {
+            loadTrack(currentIndex);
+          } else if (tracks.length > 0) {
+            currentIndex = 0;
+            loadTrack(0);
+          }
+          updateTrackList();
+        })();
+      }
+    }, 3000);
+  }
+} else {
+  // 非 Cordova 环境（浏览器）
+  (async function initApp() {
+    try {
+      await openDB();
+      const hasData = await loadAllData();
+      if (hasData) console.log('[持久化] 已恢复历史数据');
+    } catch (e) {
+      console.warn('[持久化] 初始化失败:', e);
+    }
+    applySettings();
+    renderCategoryBar();
+    renderSettingsColors();
+    if (tracks.length > 0 && currentIndex < tracks.length) {
+      loadTrack(currentIndex);
+    } else if (tracks.length > 0) {
+      currentIndex = 0;
+      loadTrack(0);
+    }
+    updateTrackList();
+  })();
+}
+
 // ==================== Cordova Integration ====================
 function setupCordovaBridge() {
   if (!window.YinguMusic) return;
@@ -3421,29 +4059,44 @@ function setupCordovaBridge() {
     }
   });
 
-  // 拦截 play/pause/loadTrack 通知 Native 更新通知栏
+  // 拦截 play/pause/loadTrack 通知 Native 更新通知栏和前台服务
   var _origPlay = play, _origPause = pause, _origLoad = loadTrack;
+  var serviceStarted = false;
+
   function notifyNative() {
     try {
       var name = tracks[currentIndex] ? tracks[currentIndex].name : '音轨';
       var idx = currentIndex + 1, total = tracks.length;
+
+      // 播放时确保前台服务已启动（持有 WakeLock + 通知栏）
+      if (isPlaying && !serviceStarted) {
+        YinguMusic.startService();
+        serviceStarted = true;
+      }
+
+      // 更新播放状态（通知 Native 当前曲目、播放/暂停）
       YinguMusic.updatePlayback(isPlaying, name, idx, total);
-    } catch (e) {}
+
+      // 停止时重置标志
+      if (!isPlaying) {
+        serviceStarted = false;
+      }
+    } catch (e) {
+      console.warn('Cordova notifyNative error:', e);
+    }
   }
-  play = function() { _origPlay(); setTimeout(notifyNative, 100); };
-  pause = function() { _origPause(); setTimeout(notifyNative, 100); };
-  loadTrack = function(i) { _origLoad(i); setTimeout(notifyNative, 200); };
+
+  play = function() { _origPlay(); setTimeout(notifyNative, 50); };
+  pause = function() { _origPause(); setTimeout(notifyNative, 50); };
+  loadTrack = function(i) { _origLoad(i); setTimeout(notifyNative, 100); };
 
   // 初始通知
-  setTimeout(notifyNative, 1000);
+  setTimeout(notifyNative, 500);
 }
 
-if (window.cordova) {
-  document.addEventListener('deviceready', function() {
-    setupCordovaBridge();
-  }, false);
-} else if ('serviceWorker' in navigator) {
-  // Web/PWA 模式 - 注册 Service Worker
+// Cordova Integration 由 _onDeviceReady() 调用 setupCordovaBridge()
+// 浏览器环境注册 Service Worker
+if (!window.cordova && 'serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('sw.js').then(reg => {
       console.log('音轨 Service Worker registered');
