@@ -1,5 +1,5 @@
 {
-  "appId": "com.yingu.player",
+  "appId": "com.yourcompany.musicplayer",
   "appName": "音轨",
   "webDir": "www",
   "bundledWebRuntime": false,
