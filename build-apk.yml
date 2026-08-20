@@ -1,0 +1,62 @@
+name: Build APK
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: 拉取代码
+      uses: actions/checkout@v4
+
+    - name: 安装 Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+
+    - name: 安装 Java
+      uses: actions/setup-java@v4
+      with:
+        distribution: 'temurin'
+        java-version: '17'
+
+    - name: 安装 Python PIL（用于生成图标）
+      run: pip install Pillow --break-system-packages || pip install Pillow
+
+    - name: 安装 Cordova
+      run: npm install -g cordova@11.1.0
+
+    - name: 安装项目依赖
+      run: npm install
+
+    - name: 生成应用图标
+      run: node scripts/generate-icons.js
+
+    - name: 添加 Android 平台
+      run: cordova platform add android --save
+
+    - name: 安装本地音乐服务插件
+      run: cordova plugin add plugins/yingu-music-service --save
+
+    - name: 安装其他插件
+      run: |
+        cordova plugin add cordova-plugin-file --save || true
+        cordova plugin add cordova-plugin-android-permissions --save || true
+
+    - name: 准备项目
+      run: cordova prepare android
+
+    - name: 构建 Debug APK
+      run: cordova build android --debug
+
+    - name: 上传 APK
+      uses: actions/upload-artifact@v4
+      with:
+        name: yingu-v1.2.1-android
+        path: platforms/android/app/build/outputs/apk/debug/*.apk
