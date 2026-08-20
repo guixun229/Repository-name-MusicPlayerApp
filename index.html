@@ -1508,25 +1508,100 @@ let isPlaying = false;
 let playMode = 'sequence';
 let currentMedia = null;
 
-// ==================== 数据持久化 (IndexedDB + localStorage) ====================
+// ==================== 数据持久化 (文件 + IndexedDB + localStorage) ====================
 // 确保退出软件、息屏、切后台后数据不丢失，只有卸载才会清除
+// 三重存储：Cordova File API（主） → IndexedDB（音频文件） → localStorage（备份）
 let _db = null;
 const DB_NAME = 'yingu_player_db';
 const DB_STORE = 'files';
 const LS_KEY = 'yingu_player_data';
+const DATA_FILE = 'yingu_player_data.json';
 
 // 打开 IndexedDB
 function openDB() {
   return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, 1);
-    req.onupgradeneeded = e => {
-      const db = e.target.result;
-      if (!db.objectStoreNames.contains(DB_STORE)) {
-        db.createObjectStore(DB_STORE);
-      }
-    };
-    req.onsuccess = e => { _db = e.target.result; resolve(_db); };
-    req.onerror = e => reject(e.target.error);
+    try {
+      const req = indexedDB.open(DB_NAME, 1);
+      req.onupgradeneeded = e => {
+        const db = e.target.result;
+        if (!db.objectStoreNames.contains(DB_STORE)) {
+          db.createObjectStore(DB_STORE);
+        }
+      };
+      req.onsuccess = e => { _db = e.target.result; resolve(_db); };
+      req.onerror = e => { console.warn('[持久化] IndexedDB 打开失败，仅用文件存储'); resolve(null); };
+    } catch(e) {
+      console.warn('[持久化] IndexedDB 不可用:', e);
+      resolve(null);
+    }
+  });
+}
+
+// ==================== 文件存储 (最可靠) ====================
+function saveToFile(jsonStr) {
+  return new Promise((resolve) => {
+    if (!window.cordova || !window.resolveLocalFileSystemURL) {
+      // 非 Cordova 环境，用 localStorage 兜底
+      try { localStorage.setItem(LS_KEY, jsonStr); } catch(e) {}
+      resolve();
+      return;
+    }
+    const path = cordova.file.dataDirectory || cordova.file.filesDirectory || cordova.file.applicationStorageDirectory;
+    if (!path) { try { localStorage.setItem(LS_KEY, jsonStr); } catch(e) {} resolve(); return; }
+    window.resolveLocalFileSystemURL(path, function(dirEntry) {
+      dirEntry.getFile(DATA_FILE, { create: true }, function(fileEntry) {
+        fileEntry.createWriter(function(writer) {
+          writer.onwriteend = function() { resolve(); };
+          writer.onerror = function() {
+            try { localStorage.setItem(LS_KEY, jsonStr); } catch(e) {}
+            resolve();
+          };
+          writer.write(jsonStr);
+        }, function() {
+          try { localStorage.setItem(LS_KEY, jsonStr); } catch(e) {}
+          resolve();
+        });
+      }, function() {
+        try { localStorage.setItem(LS_KEY, jsonStr); } catch(e) {}
+        resolve();
+      });
+    }, function() {
+      try { localStorage.setItem(LS_KEY, jsonStr); } catch(e) {}
+      resolve();
+    });
+  });
+}
+
+function loadFromFile() {
+  return new Promise((resolve) => {
+    if (!window.cordova || !window.resolveLocalFileSystemURL) {
+      try { resolve(localStorage.getItem(LS_KEY)); } catch(e) { resolve(null); }
+      return;
+    }
+    const path = cordova.file.dataDirectory || cordova.file.filesDirectory || cordova.file.applicationStorageDirectory;
+    if (!path) { try { resolve(localStorage.getItem(LS_KEY)); } catch(e) { resolve(null); } return; }
+    window.resolveLocalFileSystemURL(path, function(dirEntry) {
+      dirEntry.getFile(DATA_FILE, {}, function(fileEntry) {
+        fileEntry.file(function(file) {
+          const reader = new FileReader();
+          reader.onloadend = function() {
+            if (this.result) { resolve(this.result); }
+            else { try { resolve(localStorage.getItem(LS_KEY)); } catch(e) { resolve(null); } }
+          };
+          reader.onerror = function() {
+            try { resolve(localStorage.getItem(LS_KEY)); } catch(e) { resolve(null); }
+          };
+          reader.readAsText(file);
+        }, function() {
+          try { resolve(localStorage.getItem(LS_KEY)); } catch(e) { resolve(null); }
+        });
+      }, function() {
+        // 文件不存在，尝试 localStorage
+        try { resolve(localStorage.getItem(LS_KEY)); } catch(e) { resolve(null); }
+      });
+    }, function() {
+      try { resolve(localStorage.getItem(LS_KEY)); } catch(e) { resolve(null); }
+    });
   });
 }
 
@@ -1639,6 +1714,8 @@ function _doSave() {
     };
 
     localStorage.setItem(LS_KEY, JSON.stringify(data));
+    // 同时写入文件（更可靠，app 被杀也不会丢）
+    saveToFile(JSON.stringify(data));
     console.log('[持久化] 数据已保存:', tracksData.length, '首曲目');
   } catch (e) {
     console.error('[持久化] 保存失败:', e);
@@ -1648,7 +1725,8 @@ function _doSave() {
 // 加载持久化数据
 async function loadAllData() {
   try {
-    const raw = localStorage.getItem(LS_KEY);
+    // 优先从文件加载（更可靠），失败则用 localStorage
+    let raw = await loadFromFile();
     if (!raw) {
       console.log('[持久化] 无历史数据，使用默认');
       return false;
@@ -1673,17 +1751,19 @@ async function loadAllData() {
       if (track.src && track.src.startsWith('idb:')) {
         const fileKey = track.src.substring(4);
         try {
-          const blob = await dbGet(fileKey);
+          const blob = _db ? await dbGet(fileKey) : null;
           if (blob) {
             track.src = URL.createObjectURL(blob);
             track._fileKey = fileKey;
           } else {
-            console.warn('[持久化] 文件未找到:', fileKey);
-            track.src = ''; // 文件丢失，置空
+            console.warn('[持久化] 音频文件未找到:', fileKey, '（曲目信息已保留）');
+            track.src = ''; // 音频文件丢失，但曲目信息保留
+            track._fileKey = fileKey; // 保留 key，方便后续重新关联
           }
         } catch (e) {
-          console.warn('[持久化] 读取文件失败:', fileKey, e);
+          console.warn('[持久化] 读取音频文件失败:', fileKey, '（曲目信息已保留）');
           track.src = '';
+          track._fileKey = fileKey;
         }
       }
       tracks.push(track);
@@ -2228,7 +2308,10 @@ function releaseWakeLock() {
 
 // 页面可见性变化 - 恢复 Wake Lock 和静音保活
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible' && isPlaying) {
+  if (document.visibilityState === 'hidden') {
+    // 页面隐藏时立即保存数据
+    _doSave();
+  } else if (document.visibilityState === 'visible' && isPlaying) {
     requestWakeLock();
     startSilentKeepAlive();
     // 恢复后确保音频继续播放
@@ -2238,11 +2321,18 @@ document.addEventListener('visibilitychange', () => {
   }
 });
 
+// beforeunload - 最后机会保存数据
+window.addEventListener('beforeunload', () => {
+  _doSave();
+});
+
 // Cordova 生命周期 - pause 事件（息屏/切后台时触发）
 // 在 Cordova WebView 中，这个事件比 visibilitychange 更可靠
 if (window.cordova) {
   document.addEventListener('pause', () => {
-    // 息屏/切后台时：确保 Native 服务知道我们在播放
+    // 息屏/切后台时：立即保存数据（不用防抖，防止被杀掉时丢数据）
+    _doSave();
+    // 通知 Native 服务
     if (isPlaying && window.YinguMusic) {
       try {
         var name = tracks[currentIndex] ? tracks[currentIndex].name : '音轨';
@@ -2284,8 +2374,9 @@ document.addEventListener('resume', () => {
   }
 });
 
-// pagehide - 确保后台播放状态正确
+// pagehide - 确保后台播放状态正确，并保存数据
 window.addEventListener('pagehide', (event) => {
+  _doSave(); // 立即保存，防止数据丢失
   if (isPlaying) {
     // 确保浏览器知道我们正在播放，应该在后台继续
     if ('mediaSession' in navigator) {
@@ -3772,9 +3863,17 @@ renderCategoryBar();
 updateTrackList();
 
 // ==================== App Init ====================
-// 先打开数据库，加载数据，再初始化 UI
+// 等 Cordova deviceready 后再加载数据（确保 File API 可用）
 (async function initApp() {
   try {
+    // 如果在 Cordova 环境中，等待 deviceready
+    if (window.cordova) {
+      await new Promise((resolve) => {
+        document.addEventListener('deviceready', resolve, false);
+        // 超时兜底：2秒后无论如何都继续
+        setTimeout(resolve, 2000);
+      });
+    }
     await openDB();
     const hasData = await loadAllData();
     if (hasData) {
