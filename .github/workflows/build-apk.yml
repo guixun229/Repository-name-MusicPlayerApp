@@ -2,68 +2,55 @@ name: Build APK
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
   workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v4
+    - name: 拉取代码
+      uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 18
+    - name: 安装 Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
 
-      - name: Install dependencies
-        run: npm install
+    - name: 安装 Java
+      uses: actions/setup-java@v4
+      with:
+        distribution: 'temurin'
+        java-version: '17'
 
-      - name: Add Android platform
-        run: npx cap add android
+    - name: 安装 Cordova
+      run: npm install -g cordova@11.1.0
 
-      - name: Copy native files to Android
-        run: |
-          # 创建 Java 包目录（包名必须和 capacitor.config.json 里的 appId 一致）
-          mkdir -p android/app/src/main/java/com/yingu/player
+    - name: 安装项目依赖
+      run: npm install
 
-          # 从根目录复制 Java 文件
-          cp MainActivity.java android/app/src/main/java/com/yingu/player/ 2>/dev/null || true
-          cp MusicService.java android/app/src/main/java/com/yingu/player/ 2>/dev/null || true
-          cp YinguMusicPlugin.java android/app/src/main/java/com/yingu/player/ 2>/dev/null || true
+    - name: 添加 Android 平台
+      run: cordova platform add android --save
 
-          # 复制配置文件到 Android 目录（只复制 config.xml，不复制 plugin.xml）
-          mkdir -p android/app/src/main/res/xml
-          cp config.xml android/app/src/main/res/xml/ 2>/dev/null || true
+    - name: 安装本地音乐服务插件
+      run: cordova plugin add plugins/yingu-music-service --save
 
-          # 复制 JS 插件文件
-          mkdir -p android/app/src/main/assets/public
-          cp YinguMusic.js android/app/src/main/assets/public/ 2>/dev/null || true
+    - name: 安装其他插件
+      run: |
+        cordova plugin add cordova-plugin-file --save || true
+        cordova plugin add cordova-plugin-android-permissions --save || true
 
-      - name: Generate Android assets
-        run: npx capacitor-assets generate --android
+    - name: 准备项目
+      run: cordova prepare android
 
-      - name: Sync Capacitor (Android)
-        run: npx cap sync android
+    - name: 构建 Debug APK
+      run: cordova build android --debug
 
-      - name: Set up Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'temurin'
-          java-version: '17'
-
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-        with:
-          sdk-packages: "platforms;android-33 build-tools;33.0.0"
-
-      - name: Build APK
-        run: |
-          cd android
-          chmod +x gradlew
-          ./gradlew assembleDebug
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: app-debug
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+    - name: 上传 APK
+      uses: actions/upload-artifact@v4
+      with:
+        name: yingu-v1.2.1-android
+        path: platforms/android/app/build/outputs/apk/debug/*.apk
