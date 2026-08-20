@@ -1,12 +1,33 @@
 {
-  "name": "yingu-music-service",
+  "name": "yingu-music-player",
+  "displayName": "音轨",
   "version": "1.2.1",
-  "description": "音轨 - 后台音乐播放服务、通知栏控制、MediaSession",
-  "cordova": {
-    "id": "yingu-music-service",
-    "platforms": ["android"]
+  "description": "音轨 - 极简唱片音乐播放器",
+  "main": "index.js",
+  "scripts": {
+    "build": "echo 'No build step needed for static web app'",
+    "prepare": "echo 'Preparing web resources'"
   },
-  "keywords": ["cordova", "music", "service", "background", "android"],
+  "keywords": [
+    "ecosystem:cordova",
+    "music",
+    "player"
+  ],
   "author": "音轨",
-  "license": "Apache 2.0"
+  "license": "Apache-2.0",
+  "dependencies": {
+    "cordova-android": "^12.0.1"
+  },
+  "devDependencies": {
+    "cordova": "^11.1.0"
+  },
+  "cordova": {
+    "plugins": {
+      "cordova-plugin-file": {},
+      "cordova-plugin-android-permissions": {}
+    },
+    "platforms": [
+      "android"
+    ]
+  }
 }
