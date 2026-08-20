@@ -1,4 +1,4 @@
-package com.yingu.player;
+package com.yourcompany.musicplayer;
 
 import android.os.Bundle;
 import android.util.Log;
