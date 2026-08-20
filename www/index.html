@@ -1471,7 +1471,7 @@ input[type="file"] { display: none; }
   </div>
 </div>
 
-<!-- Hidden media elements - 添加 crossorigin 和 webkit-playsinline 确保后台播放 -->
+<!-- Hidden media elements -->
 <audio id="audioPlayer" preload="auto" playsinline webkit-playsinline crossorigin="anonymous"></audio>
 <video id="videoPlayer" preload="auto" playsinline webkit-playsinline crossorigin="anonymous"></video>
 
@@ -1509,8 +1509,6 @@ let playMode = 'sequence';
 let currentMedia = null;
 
 // ==================== 数据持久化 (文件 + IndexedDB + localStorage) ====================
-// 确保退出软件、息屏、切后台后数据不丢失，只有卸载才会清除
-// 三重存储：Cordova File API（主） → IndexedDB（音频文件） → localStorage（备份）
 let _db = null;
 const DB_NAME = 'yingu_player_db';
 const DB_STORE = 'files';
@@ -1541,7 +1539,6 @@ function openDB() {
 function saveToFile(jsonStr) {
   return new Promise((resolve) => {
     if (!window.cordova || !window.resolveLocalFileSystemURL) {
-      // 非 Cordova 环境，用 localStorage 兜底
       try { localStorage.setItem(LS_KEY, jsonStr); } catch(e) {}
       resolve();
       return;
@@ -1596,7 +1593,6 @@ function loadFromFile() {
           try { resolve(localStorage.getItem(LS_KEY)); } catch(e) { resolve(null); }
         });
       }, function() {
-        // 文件不存在，尝试 localStorage
         try { resolve(localStorage.getItem(LS_KEY)); } catch(e) { resolve(null); }
       });
     }, function() {
@@ -1605,7 +1601,6 @@ function loadFromFile() {
   });
 }
 
-// 存储文件到 IndexedDB
 function dbPut(key, blob) {
   return new Promise((resolve, reject) => {
     if (!_db) return reject('DB not open');
@@ -1616,7 +1611,6 @@ function dbPut(key, blob) {
   });
 }
 
-// 从 IndexedDB 读取文件
 function dbGet(key) {
   return new Promise((resolve, reject) => {
     if (!_db) return reject('DB not open');
@@ -1627,7 +1621,6 @@ function dbGet(key) {
   });
 }
 
-// 从 IndexedDB 删除文件
 function dbDelete(key) {
   return new Promise((resolve, reject) => {
     if (!_db) return reject('DB not open');
@@ -1638,20 +1631,15 @@ function dbDelete(key) {
   });
 }
 
-// 防抖保存（用于文件/localStorage，较慢）
 let _saveTimer = null;
-// 立即保存标记
 let _deviceReady = false;
 
 function saveAllData() {
-  // 立即保存到 SharedPreferences（同步，最快最可靠）
   _saveToNative();
-  // 防抖保存到文件/localStorage（较慢，作为备份）
   if (_saveTimer) clearTimeout(_saveTimer);
   _saveTimer = setTimeout(_doSave, 500);
 }
 
-// 立即保存到 Android SharedPreferences（同步调用，不等回调）
 function _saveToNative() {
   try {
     if (!_deviceReady || !window.YinguMusic || !window.YinguMusic.saveData) return;
@@ -1663,7 +1651,6 @@ function _saveToNative() {
   }
 }
 
-// 序列化数据（提取公共逻辑）
 function _serializeData() {
   const tracksData = tracks.map(t => {
     const copy = { ...t };
@@ -1676,7 +1663,6 @@ function _serializeData() {
     return copy;
   });
 
-  // 🔧 FIX: 统一处理图片序列化，优先使用 _fileKey
   function serializeImageList(arr) {
     return arr.map((item, i) => {
       if (typeof item === 'object' && item !== null) {
@@ -1688,7 +1674,7 @@ function _serializeData() {
       }
       if (typeof item === 'string') {
         if (item.startsWith('blob:')) {
-          return ''; // blob URL 不能跨会话，丢弃
+          return '';
         }
         return item;
       }
@@ -1732,19 +1718,15 @@ function _doSave() {
     const data = _serializeData();
     const jsonStr = JSON.stringify(data);
     localStorage.setItem(LS_KEY, jsonStr);
-    // 写入文件（异步备份）
     saveToFile(jsonStr);
-    // 🔧 FIX: 移除重复的 Native 调用，避免重复写入（由 _saveToNative 负责）
     console.log('[持久化] 数据已保存:', data.tracks.length, '首曲目');
   } catch (e) {
     console.error('[持久化] 保存失败:', e);
   }
 }
 
-// 加载持久化数据
 async function loadAllData() {
   try {
-    // 1. 优先从 Android SharedPreferences 加载（最可靠）
     let raw = null;
     if (window.YinguMusic && window.YinguMusic.loadData) {
       try {
@@ -1756,12 +1738,10 @@ async function loadAllData() {
         if (raw) console.log('[持久化] 从 SharedPreferences 加载成功');
       } catch(e) { console.warn('[持久化] SharedPreferences 加载失败:', e); }
     }
-    // 2. 回退到文件
     if (!raw) {
       raw = await loadFromFile();
       if (raw) console.log('[持久化] 从文件加载成功');
     }
-    // 3. 回退到 localStorage
     if (!raw) {
       raw = localStorage.getItem(LS_KEY);
       if (raw) console.log('[持久化] 从 localStorage 加载成功');
@@ -1774,7 +1754,6 @@ async function loadAllData() {
     const data = JSON.parse(raw);
     if (!data || !data.tracks) return false;
 
-    // 恢复分类
     if (data.categories && Array.isArray(data.categories)) {
       categories = data.categories;
     }
@@ -1783,7 +1762,6 @@ async function loadAllData() {
     if (data.currentCategoryId) currentCategoryId = data.currentCategoryId;
     if (data.playMode) playMode = data.playMode;
 
-    // 恢复 tracks，把 idb: 引用转回 blob URL
     tracks = [];
     for (const t of data.tracks) {
       const track = { ...t };
@@ -1796,8 +1774,8 @@ async function loadAllData() {
             track._fileKey = fileKey;
           } else {
             console.warn('[持久化] 音频文件未找到:', fileKey, '（曲目信息已保留）');
-            track.src = ''; // 音频文件丢失，但曲目信息保留
-            track._fileKey = fileKey; // 保留 key，方便后续重新关联
+            track.src = '';
+            track._fileKey = fileKey;
           }
         } catch (e) {
           console.warn('[持久化] 读取音频文件失败:', fileKey, '（曲目信息已保留）');
@@ -1808,7 +1786,6 @@ async function loadAllData() {
       tracks.push(track);
     }
 
-    // 恢复 settings
     if (data.settings) {
       const s = data.settings;
       if (s.bgColor) settings.bgColor = s.bgColor;
@@ -1824,7 +1801,6 @@ async function loadAllData() {
       if (s.recordOpacityImage !== undefined) settings.recordOpacityImage = s.recordOpacityImage;
       if (s.labelOpacityImage !== undefined) settings.labelOpacityImage = s.labelOpacityImage;
 
-      // 🔧 FIX: 恢复图片，跳过无效引用
       async function restoreImageList(refs) {
         const result = [];
         for (const ref of refs) {
@@ -1834,14 +1810,12 @@ async function loadAllData() {
               if (blob) {
                 result.push({ url: URL.createObjectURL(blob), _fileKey: ref.substring(4) });
               } else {
-                // 🔧 FIX: 文件丢失，跳过，不添加空对象
                 console.warn('[持久化] 图片文件未找到:', ref);
               }
             } catch (e) {
               console.warn('[持久化] 读取图片失败:', ref);
             }
           } else if (typeof ref === 'string' && ref.length > 0 && !ref.startsWith('blob:')) {
-            // 网络图片或本地路径，直接保留
             result.push(ref);
           }
         }
@@ -1852,13 +1826,11 @@ async function loadAllData() {
       if (s.recordImages) settings.recordImages = await restoreImageList(s.recordImages);
       if (s.labelImages) settings.labelImages = await restoreImageList(s.labelImages);
 
-      // 修正索引越界
       if (settings.bgImageIndex >= settings.bgImages.length) settings.bgImageIndex = settings.bgImages.length - 1;
       if (settings.recordImageIndex >= settings.recordImages.length) settings.recordImageIndex = settings.recordImages.length - 1;
       if (settings.labelImageIndex >= settings.labelImages.length) settings.labelImageIndex = settings.labelImages.length - 1;
     }
 
-    // 恢复播放位置（不自动播放，只恢复索引）
     if (data.currentIndex !== undefined && data.currentIndex < tracks.length) {
       currentIndex = data.currentIndex;
     }
@@ -1994,7 +1966,6 @@ function applySettings() {
 
   const playerView = document.getElementById('player-view');
 
-  // Background image with opacity
   if (settings.bgImages.length > 0 && settings.bgImageIndex >= 0 && settings.bgImageIndex < settings.bgImages.length) {
     const imgItem = settings.bgImages[settings.bgImageIndex];
     const imgUrl = typeof imgItem === 'string' ? imgItem : (imgItem && imgItem.url ? imgItem.url : '');
@@ -2002,27 +1973,21 @@ function applySettings() {
       const imgOpacity = settings.bgOpacityImage;
       playerView.style.background = `linear-gradient(rgba(0,0,0,${1 - imgOpacity}), rgba(0,0,0,${1 - imgOpacity + 0.1})), url('${imgUrl}') center / cover no-repeat`;
     } else {
-      // 图片 URL 无效，回退到纯色
       const bgAlpha = settings.bgOpacity;
       const bgColorRgba = hexToRgba(settings.bgColor, bgAlpha);
       const bgMidRgba = hexToRgba(adjustColor(settings.bgColor, 16), bgAlpha);
       playerView.style.background = `radial-gradient(ellipse at 50% 45%, ${bgMidRgba} 0%, ${bgColorRgba} 50%, rgba(5,5,5,${bgAlpha}) 100%)`;
     }
   } else {
-    // Background color with opacity
     const bgAlpha = settings.bgOpacity;
     const bgColorRgba = hexToRgba(settings.bgColor, bgAlpha);
     const bgMidRgba = hexToRgba(adjustColor(settings.bgColor, 16), bgAlpha);
     playerView.style.background = `radial-gradient(ellipse at 50% 45%, ${bgMidRgba} 0%, ${bgColorRgba} 50%, rgba(5,5,5,${bgAlpha}) 100%)`;
   }
 
-  // Record opacity
   record.style.opacity = settings.recordOpacity;
-
-  // Label opacity
   document.getElementById('recordLabel').style.opacity = settings.labelOpacity;
 
-  // Record image overlay
   const recordImgEl = document.getElementById('recordImageOverlay');
   if (recordImgEl) {
     if (settings.recordImages.length > 0 && settings.recordImageIndex >= 0 && settings.recordImageIndex < settings.recordImages.length) {
@@ -2040,7 +2005,6 @@ function applySettings() {
     }
   }
 
-  // Label image overlay
   const labelImgEl = document.getElementById('labelImageOverlay');
   if (labelImgEl) {
     if (settings.labelImages.length > 0 && settings.labelImageIndex >= 0 && settings.labelImageIndex < settings.labelImages.length) {
@@ -2058,7 +2022,6 @@ function applySettings() {
     }
   }
 
-  // Update UI in settings
   renderImageGrid('bgImageGrid', settings.bgImages, 'bgImageIndex', 'bgImageInput', '背景图片');
   renderImageGrid('recordImageGrid', settings.recordImages, 'recordImageIndex', 'recordImageInput', '唱片图片');
   renderImageGrid('labelImageGrid', settings.labelImages, 'labelImageIndex', 'labelImageInput', '标签图片');
@@ -2094,11 +2057,11 @@ function renderImageGrid(gridId, images, indexKey, inputId, labelName) {
   };
   const opacityRow = document.getElementById(opacityRowMap[gridId]);
 
-  // 🔧 FIX: 过滤掉无效的图片项（空字符串或没有 url 的对象）
+  // 修正：显示所有有效图片（包括 blob URL）
   const validImages = images.filter(item => {
-    if (typeof item === 'string') return item.length > 0 && !item.startsWith('blob:');
+    if (typeof item === 'string') return item.length > 0;
     if (typeof item === 'object' && item !== null) {
-      return item.url && item.url.length > 0 && !item.url.startsWith('blob:');
+      return item.url && item.url.length > 0;
     }
     return false;
   });
@@ -2143,7 +2106,6 @@ function renderImageGrid(gridId, images, indexKey, inputId, labelName) {
     grid.appendChild(item);
   });
 
-  // Add the "+" button at the end
   const addBtn = document.createElement('div');
   addBtn.className = 'bg-image-preview';
   const plus = document.createElement('span');
@@ -2155,7 +2117,6 @@ function renderImageGrid(gridId, images, indexKey, inputId, labelName) {
   });
   grid.appendChild(addBtn);
 
-  // Show/hide opacity slider
   if (opacityRow) {
     opacityRow.style.display = (validImages.length > 0) ? '' : 'none';
   }
@@ -2273,19 +2234,16 @@ function generateArtwork() {
   return canvas.toDataURL('image/png');
 }
 
-// ==================== Media Session API ====================
-// ==================== Background Audio Keep-Alive (息屏后播放不中断) ====================
+// ==================== Media Session API & Background Keep-Alive ====================
 let wakeLock = null;
 let silentAudioCtx = null;
 let silentSource = null;
 let keepAliveTimer = null;
 
-// 创建一个静音的 Web Audio 振荡器，防止浏览器在后台时暂停音频
 function startSilentKeepAlive() {
   try {
     if (!silentAudioCtx && 'AudioContext' in window) {
       silentAudioCtx = new AudioContext();
-      // 创建一个几乎静音的振荡器（0.001振幅，人耳不可听）
       silentSource = silentAudioCtx.createOscillator();
       const gain = silentAudioCtx.createGain();
       gain.gain.value = 0.001;
@@ -2294,7 +2252,6 @@ function startSilentKeepAlive() {
       gain.connect(silentAudioCtx.destination);
       silentSource.start();
     }
-    // 如果上下文被浏览器挂起，尝试恢复
     if (silentAudioCtx && silentAudioCtx.state === 'suspended') {
       silentAudioCtx.resume();
     }
@@ -2314,7 +2271,6 @@ function stopSilentKeepAlive() {
   }
 }
 
-// 启动定期保活定时器 - 每30秒通知 Native 服务保持播放
 function startKeepAliveTimer() {
   stopKeepAliveTimer();
   keepAliveTimer = setInterval(() => {
@@ -2324,11 +2280,9 @@ function startKeepAliveTimer() {
         YinguMusic.updatePlayback(true, name, currentIndex + 1, tracks.length);
       } catch (e) {}
     }
-    // 恢复 AudioContext（WebView 后台可能挂起）
     if (silentAudioCtx && silentAudioCtx.state === 'suspended') {
       silentAudioCtx.resume();
     }
-    // 确保音频在播放
     if (isPlaying && currentMedia && currentMedia.paused) {
       currentMedia.play().catch(function() {});
     }
@@ -2362,48 +2316,37 @@ function releaseWakeLock() {
   }
 }
 
-// 页面可见性变化 - 恢复 Wake Lock 和静音保活
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden') {
-    // 页面隐藏时立即保存数据（先 Native 同步，再文件）
     _saveToNative();
     _doSave();
   } else if (document.visibilityState === 'visible' && isPlaying) {
     requestWakeLock();
     startSilentKeepAlive();
-    // 恢复后确保音频继续播放
     if (currentMedia && currentMedia.paused) {
       currentMedia.play().catch(function() {});
     }
   }
 });
 
-// beforeunload - 最后机会保存数据
 window.addEventListener('beforeunload', () => {
   _saveToNative();
   _doSave();
 });
 
-// Cordova 生命周期 - pause 事件（息屏/切后台时触发）
-// 在 Cordova WebView 中，这个事件比 visibilitychange 更可靠
 if (window.cordova) {
   document.addEventListener('pause', () => {
-    // 息屏/切后台时：立即保存数据（先 Native 同步保存，防被杀丢数据）
     _saveToNative();
     _doSave();
-    // 通知 Native 服务
     if (isPlaying && window.YinguMusic) {
       try {
         var name = tracks[currentIndex] ? tracks[currentIndex].name : '音轨';
         YinguMusic.updatePlayback(true, name, currentIndex + 1, tracks.length);
       } catch (e) {}
     }
-    // 保持静音保活运行（不停止）
-    // WakeLock 在 WebView 中会被自动释放，但 Native 服务的 WakeLock 会保持
   }, false);
 
   document.addEventListener('resume', () => {
-    // 从后台恢复时：重新获取 WakeLock、恢复 AudioContext
     if (isPlaying) {
       requestWakeLock();
       startSilentKeepAlive();
@@ -2415,30 +2358,24 @@ if (window.cordova) {
   }, false);
 }
 
-// 页面生命周期 - 处理 freeze/resume 事件
 document.addEventListener('freeze', () => {
-  // 页面被浏览器冻结前，确保 Media Session 状态正确
   if ('mediaSession' in navigator) {
     navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';
   }
 });
 
 document.addEventListener('resume', () => {
-  // 页面从冻结状态恢复
   if (isPlaying) {
     requestWakeLock();
     startSilentKeepAlive();
-    // 确保 Media Session 仍然有效
     updateMediaSession();
   }
 });
 
-// pagehide - 确保后台播放状态正确，并保存数据
 window.addEventListener('pagehide', (event) => {
   _saveToNative();
   _doSave();
   if (isPlaying) {
-    // 确保浏览器知道我们正在播放，应该在后台继续
     if ('mediaSession' in navigator) {
       navigator.mediaSession.playbackState = 'playing';
     }
@@ -2489,7 +2426,6 @@ function updateMediaSession() {
     if (artworkUrl) {
       artwork.push({ src: artworkUrl, sizes: '512x512', type: 'image/png' });
     }
-    // Use record image if available
     if (settings.recordImages.length > 0 && settings.recordImageIndex >= 0) {
       const recItem = settings.recordImages[settings.recordImageIndex];
       const recUrl = typeof recItem === 'string' ? recItem : (recItem && recItem.url ? recItem.url : '');
@@ -2502,7 +2438,6 @@ function updateMediaSession() {
       artwork: artwork.length > 0 ? artwork : [{ src: '', sizes: '512x512' }]
     });
     navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';
-    // Set position state for lock screen seek bar
     if ('setPositionState' in navigator.mediaSession && currentMedia && currentMedia.duration) {
       try {
         navigator.mediaSession.setPositionState({
@@ -2553,7 +2488,6 @@ function loadTrack(index) {
     prevMedia.currentTime = 0;
   }
 
-  // 🔧 FIX: 如果 src 为空，尝试从 IndexedDB 重新加载
   if (!track.src && track._fileKey) {
     (async () => {
       try {
@@ -2588,32 +2522,26 @@ function loadTrack(index) {
   updateTrackList();
   updateMediaSession();
   updateProgress();
-  saveAllData(); // 保存当前播放位置
+  saveAllData();
 }
 
 function play() {
   if (tracks.length === 0) { showToast('请先添加曲目'); return; }
   const track = tracks[currentIndex];
   if (!track.src && track._fileKey) {
-    loadTrack(currentIndex); // 尝试重新加载
+    loadTrack(currentIndex);
     return;
   }
   isPlaying = true;
   targetSpeed = PLAY_SPEED;
   startAnimation();
-  // 先更新 Media Session 元数据（让浏览器知道这是媒体应用，息屏后应继续播放）
   updateMediaSession();
-  // 请求屏幕常亮锁
   requestWakeLock();
-  // 启动静音保活（防止浏览器在后台挂起音频上下文）
   startSilentKeepAlive();
-  // 启动定期保活定时器（每30秒检查并恢复播放）
   startKeepAliveTimer();
-  // 设置播放状态
   if ('mediaSession' in navigator) {
     navigator.mediaSession.playbackState = 'playing';
   }
-  // 播放音频
   const playPromise = currentMedia.play();
   if (playPromise && playPromise.catch) {
     playPromise.catch(() => { showToast('播放失败'); pause(); });
@@ -2626,10 +2554,7 @@ function pause() {
   targetSpeed = 0;
   startAnimation();
   releaseWakeLock();
-  // 停止定期保活定时器
   stopKeepAliveTimer();
-  // 注意：暂停时不停止静音保活，避免播放状态切换导致后台音频中断
-  // 仅在完全停止时才停止
   currentMedia.pause();
   if ('mediaSession' in navigator) {
     navigator.mediaSession.playbackState = 'paused';
@@ -2710,7 +2635,7 @@ function togglePlayMode() {
 let clickTimer = null;
 let touchHandled = false;
 let touchStartX = 0, touchStartY = 0, touchStartTime = 0;
-let recordGesture = 'pending'; // 'pending' | 'swipe' | 'tap'
+let recordGesture = 'pending';
 
 record.addEventListener('click', () => {
   if (touchHandled) return;
@@ -2728,12 +2653,10 @@ recordWrap.addEventListener('touchstart', e => {
 
 recordWrap.addEventListener('touchmove', e => {
   if (recordGesture === 'swipe') return;
-
   const t = e.touches[0];
   const dx = t.clientX - touchStartX;
   const dy = t.clientY - touchStartY;
   const absDx = Math.abs(dx), absDy = Math.abs(dy);
-
   if (recordGesture === 'pending') {
     if (absDx > 50 && absDx > absDy * 1.5) {
       recordGesture = 'swipe';
@@ -2744,28 +2667,23 @@ recordWrap.addEventListener('touchmove', e => {
 recordWrap.addEventListener('touchend', e => {
   touchHandled = true;
   setTimeout(() => { touchHandled = false; }, 350);
-
   const t = e.changedTouches[0];
   const dx = t.clientX - touchStartX;
   const dy = t.clientY - touchStartY;
   const dt = Date.now() - touchStartTime;
   const absDx = Math.abs(dx), absDy = Math.abs(dy);
-
   if (recordGesture === 'swipe') {
     if (dx > 0) { prevTrack(); showToast('上一曲'); }
     else { nextTrack(); showToast('下一曲'); }
     recordGesture = 'pending';
     return;
   }
-
-  // Tap detection
   if (absDx < 12 && absDy < 12 && dt < 300) {
     handleTap();
   }
   recordGesture = 'pending';
 }, { passive: true });
 
-// Mouse support for desktop
 let mouseDownX = 0, mouseDownY = 0, mouseDown = false;
 let mouseGesture = 'pending';
 
@@ -2780,11 +2698,9 @@ recordWrap.addEventListener('mousedown', e => {
 window.addEventListener('mousemove', e => {
   if (!mouseDown) return;
   if (mouseGesture === 'swipe') return;
-
   const dx = e.clientX - mouseDownX;
   const dy = e.clientY - mouseDownY;
   const absDx = Math.abs(dx), absDy = Math.abs(dy);
-
   if (mouseGesture === 'pending') {
     if (absDx > 60 && absDx > absDy * 1.5) {
       mouseGesture = 'swipe';
@@ -2795,7 +2711,6 @@ window.addEventListener('mousemove', e => {
 window.addEventListener('mouseup', e => {
   if (!mouseDown) return;
   mouseDown = false;
-
   if (mouseGesture === 'swipe') {
     const dx = e.clientX - mouseDownX;
     if (dx > 0) { prevTrack(); showToast('上一曲'); }
@@ -2803,7 +2718,6 @@ window.addEventListener('mouseup', e => {
     mouseGesture = 'pending';
     return;
   }
-
   mouseGesture = 'pending';
 });
 
@@ -2821,7 +2735,7 @@ function handleTap() {
   }
 }
 
-// ==================== Progress Bar Seek (Drag to seek) ====================
+// ==================== Progress Bar Seek ====================
 let isSeeking = false;
 
 function seekToPosition(clientX) {
@@ -2850,7 +2764,6 @@ function hideSeekBar() {
   progressBar.classList.remove('dragging');
 }
 
-// Touch seek
 progressBar.addEventListener('touchstart', e => {
   e.preventDefault();
   isSeeking = true;
@@ -2873,7 +2786,6 @@ progressBar.addEventListener('touchend', e => {
   updateProgress();
 }, { passive: true });
 
-// Mouse seek
 progressBar.addEventListener('mousedown', e => {
   isSeeking = true;
   showSeekBar();
@@ -2919,13 +2831,11 @@ document.getElementById('backBtn').addEventListener('click', closeList);
 document.getElementById('settingsBtn').addEventListener('click', openSettings);
 document.getElementById('settingsBackBtn').addEventListener('click', closeSettings);
 
-// Beautify section collapse/expand
 document.getElementById('beautifyToggle').addEventListener('click', () => {
   const section = document.getElementById('beautifySection');
   section.classList.toggle('collapsed');
 });
 
-// Data section collapse/expand
 document.getElementById('dataToggle').addEventListener('click', () => {
   const section = document.getElementById('dataSection');
   section.classList.toggle('collapsed');
@@ -2948,7 +2858,6 @@ document.getElementById('bgImageInput').addEventListener('change', async e => {
   e.target.value = '';
 });
 
-// Opacity sliders
 document.getElementById('bgOpacitySlider').addEventListener('input', e => {
   settings.bgOpacity = parseInt(e.target.value) / 100;
   document.getElementById('bgOpacityValue').textContent = e.target.value + '%';
@@ -2977,7 +2886,6 @@ document.getElementById('opacitySlider').addEventListener('input', e => {
   saveAllData();
 });
 
-// Record image upload
 document.getElementById('recordImageInput').addEventListener('change', async e => {
   const files = Array.from(e.target.files);
   if (files.length === 0) return;
@@ -2994,7 +2902,6 @@ document.getElementById('recordImageInput').addEventListener('change', async e =
   e.target.value = '';
 });
 
-// Label image upload
 document.getElementById('labelImageInput').addEventListener('change', async e => {
   const files = Array.from(e.target.files);
   if (files.length === 0) return;
@@ -3011,7 +2918,6 @@ document.getElementById('labelImageInput').addEventListener('change', async e =>
   e.target.value = '';
 });
 
-// Record image opacity slider
 document.getElementById('recordImgOpacitySlider').addEventListener('input', e => {
   settings.recordOpacityImage = parseInt(e.target.value) / 100;
   document.getElementById('recordImgOpacityValue').textContent = e.target.value + '%';
@@ -3019,7 +2925,6 @@ document.getElementById('recordImgOpacitySlider').addEventListener('input', e =>
   saveAllData();
 });
 
-// Label image opacity slider
 document.getElementById('labelImgOpacitySlider').addEventListener('input', e => {
   settings.labelOpacityImage = parseInt(e.target.value) / 100;
   document.getElementById('labelImgOpacityValue').textContent = e.target.value + '%';
@@ -3027,37 +2932,51 @@ document.getElementById('labelImgOpacitySlider').addEventListener('input', e => 
   saveAllData();
 });
 
-// ==================== Import / Export ====================
+// ==================== Import / Export (修复：支持导出音频文件) ====================
 document.getElementById('exportBtn').addEventListener('click', async () => {
   if (tracks.length === 0) { showToast('暂无曲目可导出'); return; }
 
-  // Only export tracks that are not blob: URLs (blob URLs won't work after import)
-  const exportableTracks = tracks.filter(t => !t.src.startsWith('blob:'));
-  const blobTracks = tracks.filter(t => t.src.startsWith('blob:'));
+  // 显示进度提示
+  showToast('正在打包导出...');
 
-  if (exportableTracks.length === 0) {
-    const confirmed = await showModal({
-      title: '导出提示',
-      bodyHTML: `当前 ${blobTracks.length} 首曲目均为本地文件（blob），导入到新设备后无法直接播放。仍要导出？`,
-      buttons: [
-        { text: '取消', value: false, style: 'cancel' },
-        { text: '导出', value: true, style: 'confirm' }
-      ]
-    });
-    if (!confirmed) return;
+  // 构建导出数据，将 blob 音频转为 base64
+  const exportTracks = [];
+  for (const t of tracks) {
+    const item = {
+      id: t.id,
+      name: t.name,
+      type: t.type,
+      categoryId: t.categoryId
+    };
+
+    // 如果是本地 blob，读取为 base64
+    if (t.src && t.src.startsWith('blob:')) {
+      try {
+        const response = await fetch(t.src);
+        const blob = await response.blob();
+        const reader = new FileReader();
+        const base64 = await new Promise((resolve) => {
+          reader.onloadend = () => resolve(reader.result);
+          reader.readAsDataURL(blob);
+        });
+        item.srcData = base64;   // 保存 base64 数据
+        item.mimeType = blob.type || 'audio/mpeg';
+      } catch (e) {
+        console.warn('导出音频失败:', t.name, e);
+        item.src = t.src; // 降级保留原 URL
+      }
+    } else {
+      // 网络资源或已失效的 blob，保留原 src
+      item.src = t.src;
+    }
+    exportTracks.push(item);
   }
 
   const exportData = {
     app: '音轨',
     version: '1.2.1',
     exportDate: new Date().toISOString(),
-    tracks: tracks.map(t => ({
-      id: t.id,
-      name: t.name,
-      src: t.src,
-      type: t.type,
-      categoryId: t.categoryId
-    })),
+    tracks: exportTracks,
     categories: categories,
     settings: {
       bgColor: settings.bgColor,
@@ -3076,7 +2995,7 @@ document.getElementById('exportBtn').addEventListener('click', async () => {
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
-  showToast(`已导出 ${tracks.length} 首曲目`);
+  showToast(`已导出 ${tracks.length} 首曲目（含本地音频）`);
 });
 
 document.getElementById('importBtn').addEventListener('click', () => {
@@ -3097,14 +3016,7 @@ document.getElementById('importInput').addEventListener('change', async e => {
       return;
     }
 
-    // Check for blob URLs that won't work
-    const blobCount = data.tracks.filter(t => t.src && t.src.startsWith('blob:')).length;
-    const validTracks = data.tracks.filter(t => t.src && !t.src.startsWith('blob:'));
-
     let msg = `找到 ${data.tracks.length} 首曲目`;
-    if (blobCount > 0) {
-      msg += `\n其中 ${blobCount} 首为本地文件，将跳过`;
-    }
     msg += '\n\n确定导入吗？\n导入后将替换当前曲目列表';
 
     const confirmed = await showModal({
@@ -3117,23 +3029,44 @@ document.getElementById('importInput').addEventListener('change', async e => {
     });
     if (!confirmed) return;
 
-    // Stop playback
+    // 停止播放
     pause();
     currentMedia.src = '';
 
-    // Replace tracks
-    tracks = validTracks.map((t, i) => ({
-      id: t.id || i,
-      name: t.name || `曲目 ${i + 1}`,
-      src: t.src,
-      type: t.type || 'audio',
-      categoryId: t.categoryId || 'cat-0'
-    }));
+    // 处理导入的 tracks
+    const newTracks = [];
+    for (const t of data.tracks) {
+      let src = t.src || '';
+      let fileKey = null;
+
+      // 如果包含 srcData，还原为 blob
+      if (t.srcData && t.srcData.startsWith('data:')) {
+        try {
+          const response = await fetch(t.srcData);
+          const blob = await response.blob();
+          fileKey = 'audio-import-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+          await dbPut(fileKey, blob);
+          src = URL.createObjectURL(blob);
+        } catch (e) {
+          console.warn('还原音频失败:', t.name, e);
+          src = ''; // 还原失败，留空
+        }
+      }
+
+      newTracks.push({
+        id: t.id || nextTrackId++,
+        name: t.name || '未命名',
+        src: src,
+        type: t.type || 'audio',
+        categoryId: t.categoryId || 'cat-0',
+        _fileKey: fileKey
+      });
+    }
+
+    tracks = newTracks;
     nextTrackId = tracks.length;
 
-    // Import categories if available
     if (data.categories && Array.isArray(data.categories)) {
-      // Ensure default category exists
       const hasDefault = data.categories.some(c => c.id === 'cat-0');
       if (!hasDefault) data.categories.unshift({ id: 'cat-0', name: '默认' });
       categories = data.categories;
@@ -3143,7 +3076,6 @@ document.getElementById('importInput').addEventListener('change', async e => {
       })) + 1;
     }
 
-    // Import settings if available
     if (data.settings) {
       if (data.settings.bgColor) settings.bgColor = data.settings.bgColor;
       if (data.settings.recordColor) settings.recordColor = data.settings.recordColor;
@@ -3165,6 +3097,7 @@ document.getElementById('importInput').addEventListener('change', async e => {
     saveAllData();
     showToast(`已导入 ${tracks.length} 首曲目`);
   } catch (err) {
+    console.error(err);
     showToast('导入失败：文件格式错误');
   }
 });
@@ -3183,7 +3116,6 @@ function renderColorSwatches(containerId, presets, currentColor, onPick) {
     container.appendChild(sw);
   });
 
-  // Custom color picker
   const customWrap = document.createElement('div');
   customWrap.className = 'color-custom-wrap';
   const customInput = document.createElement('input');
@@ -3363,7 +3295,6 @@ function attachTrackItemListeners() {
     const editBtn = item.querySelector('.track-action.edit');
     const deleteBtn = item.querySelector('.track-action.delete');
 
-    // Batch mode: tap item toggles selection
     if (batchMode) {
       content.addEventListener('touchend', e => {
         e.preventDefault();
@@ -3373,10 +3304,9 @@ function attachTrackItemListeners() {
         e.preventDefault();
         e.stopPropagation();
       });
-      return; // skip normal gesture/listener attachment in batch mode
+      return;
     }
 
-    // Use touchend for instant response on mobile
     function handleBtnTouch(btn, action) {
       btn.addEventListener('touchstart', e => {
         e.stopPropagation();
@@ -3401,12 +3331,12 @@ function attachTrackItemListeners() {
   });
 }
 
-// ==================== Track Item Gestures (Swipe + Long-Press Drag) ====================
+// ==================== Track Item Gestures ====================
 function attachTrackItemGestures(content, item) {
   let startX = 0, startY = 0, startTime = 0;
   let deltaX = 0, deltaY = 0;
   let lastDeltaY = 0;
-  let mode = 'pending'; // 'pending' | 'swipe' | 'drag' | 'scroll' | 'batch'
+  let mode = 'pending';
   let longPressTimer = null;
   let itemHeight = 0;
   let dragStartIndex = -1;
@@ -3419,7 +3349,6 @@ function attachTrackItemGestures(content, item) {
   content.addEventListener('touchstart', e => {
     if (e.touches.length > 1) return;
     const t = e.touches[0];
-    // 检测是否触摸在拖拽手柄上
     isHandleTouch = e.target.classList && e.target.classList.contains('track-drag-handle');
     startX = t.clientX;
     startY = t.clientY;
@@ -3431,11 +3360,9 @@ function attachTrackItemGestures(content, item) {
     itemHeight = content.offsetHeight || 60;
     content.style.transition = 'none';
 
-    // Long press timer (400ms) - fires if finger stays nearly still
     longPressTimer = setTimeout(() => {
       if (mode === 'pending') {
         if (isHandleTouch) {
-          // 长按拖拽手柄 → 进入拖拽排序模式
           mode = 'drag';
           content.classList.add('dragging');
           item.classList.add('dragging-mode');
@@ -3446,7 +3373,6 @@ function attachTrackItemGestures(content, item) {
           dragStartIndex = parseInt(item.dataset.displayIndex);
           lastTargetIndex = dragStartIndex;
         } else {
-          // 长按其他区域 → 进入批量选择模式
           const trackIdx = parseInt(item.dataset.trackIndex);
           if (navigator.vibrate) navigator.vibrate(50);
           enterBatchMode(trackIdx);
@@ -3469,7 +3395,6 @@ function attachTrackItemGestures(content, item) {
         longPressTimer = null;
 
         if (absDx > absDy) {
-          // Horizontal swipe
           mode = 'swipe';
           trackList.querySelectorAll('.track-item-content.revealed, .track-item-content.near-revealed').forEach(el => {
             if (el !== content) {
@@ -3480,14 +3405,12 @@ function attachTrackItemGestures(content, item) {
             }
           });
         } else {
-          // Vertical scroll - handle manually
           mode = 'scroll';
           lastDeltaY = deltaY;
           content.style.transition = '';
           content.style.transform = '';
         }
       } else {
-        // Small movement - prevent default, keep waiting for long press
         e.preventDefault();
         return;
       }
@@ -3509,7 +3432,6 @@ function attachTrackItemGestures(content, item) {
       e.preventDefault();
       content.style.transform = `translateY(${deltaY}px) scale(1.02)`;
 
-      // Auto-scroll when dragging near top/bottom edges
       const wrapperRect = trackListWrapper.getBoundingClientRect();
       const contentRect = content.getBoundingClientRect();
       const dragY = contentRect.top + contentRect.height / 2;
@@ -3530,7 +3452,6 @@ function attachTrackItemGestures(content, item) {
         });
       }
 
-      // Calculate target index based on drag position
       const targetIdx = Math.max(0, Math.min(allItems.length - 1,
         dragStartIndex + Math.round(deltaY / itemHeight)));
 
@@ -3560,7 +3481,6 @@ function attachTrackItemGestures(content, item) {
       }
       item.dataset.targetIndex = targetIdx;
     }
-    // 'batch' mode: no move handling needed
   }, { passive: false });
 
   content.addEventListener('touchend', e => {
@@ -3609,7 +3529,6 @@ function attachTrackItemGestures(content, item) {
         tracks.splice(fromIdx, 1);
         tracks.splice(toIdx, 0, movedTrack);
 
-        // Update currentIndex if the playing track moved
         if (currentIndex === fromIdx) {
           currentIndex = toIdx;
         } else if (fromIdx < currentIndex && toIdx >= currentIndex) {
@@ -3624,12 +3543,10 @@ function attachTrackItemGestures(content, item) {
       updateTrackList();
       saveAllData();
     } else if (mode === 'batch') {
-      // Batch mode already entered on long-press, nothing to do on touchend
     } else if (mode === 'scroll') {
       content.style.transition = '';
       content.style.transform = '';
     } else if (mode === 'pending' && absDx < 12 && absDy < 12 && dt < 500) {
-      // Tap
       content.style.transition = '';
       content.style.transform = '';
       if (content.classList.contains('revealed') || content.classList.contains('near-revealed')) {
@@ -3645,7 +3562,6 @@ function attachTrackItemGestures(content, item) {
     mode = 'pending';
   }, { passive: true });
 
-  // Prevent context menu on long press (iOS/Android)
   content.addEventListener('contextmenu', e => e.preventDefault());
 }
 
@@ -3958,13 +3874,10 @@ renderCategoryBar();
 updateTrackList();
 
 // ==================== App Init ====================
-// Cordova 设备就绪后加载数据
 function _onDeviceReady() {
   _deviceReady = true;
   console.log('[持久化] deviceready 已触发');
-  // 设置 Cordova 桥接
   setupCordovaBridge();
-  // 加载数据
   (async function() {
     try {
       await openDB();
@@ -3989,12 +3902,10 @@ function _onDeviceReady() {
 }
 
 if (window.cordova) {
-  // 检查 deviceready 是否已经触发
   if (typeof cordova !== 'undefined' && cordova.fired) {
     _onDeviceReady();
   } else {
     document.addEventListener('deviceready', _onDeviceReady, false);
-    // 超时兜底：3秒后无论如何都继续
     setTimeout(function() {
       if (!_deviceReady) {
         console.warn('[持久化] deviceready 超时，强制加载');
@@ -4022,7 +3933,6 @@ if (window.cordova) {
     }, 3000);
   }
 } else {
-  // 非 Cordova 环境（浏览器）
   (async function initApp() {
     try {
       await openDB();
@@ -4048,7 +3958,6 @@ if (window.cordova) {
 function setupCordovaBridge() {
   if (!window.YinguMusic) return;
 
-  // 注册通知栏控制回调
   YinguMusic.onControl(function(action) {
     switch (action) {
       case 'toggle': togglePlay(); break;
@@ -4059,7 +3968,6 @@ function setupCordovaBridge() {
     }
   });
 
-  // 拦截 play/pause/loadTrack 通知 Native 更新通知栏和前台服务
   var _origPlay = play, _origPause = pause, _origLoad = loadTrack;
   var serviceStarted = false;
 
@@ -4068,16 +3976,13 @@ function setupCordovaBridge() {
       var name = tracks[currentIndex] ? tracks[currentIndex].name : '音轨';
       var idx = currentIndex + 1, total = tracks.length;
 
-      // 播放时确保前台服务已启动（持有 WakeLock + 通知栏）
       if (isPlaying && !serviceStarted) {
         YinguMusic.startService();
         serviceStarted = true;
       }
 
-      // 更新播放状态（通知 Native 当前曲目、播放/暂停）
       YinguMusic.updatePlayback(isPlaying, name, idx, total);
 
-      // 停止时重置标志
       if (!isPlaying) {
         serviceStarted = false;
       }
@@ -4090,12 +3995,9 @@ function setupCordovaBridge() {
   pause = function() { _origPause(); setTimeout(notifyNative, 50); };
   loadTrack = function(i) { _origLoad(i); setTimeout(notifyNative, 100); };
 
-  // 初始通知
   setTimeout(notifyNative, 500);
 }
 
-// Cordova Integration 由 _onDeviceReady() 调用 setupCordovaBridge()
-// 浏览器环境注册 Service Worker
 if (!window.cordova && 'serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('sw.js').then(reg => {
