@@ -35,6 +35,11 @@ jobs:
         unzip -q gradle-8.7-bin.zip -d /opt/
         echo "/opt/gradle-8.7/bin" >> $GITHUB_PATH
 
+    - name: 安装 Android Build Tools
+      run: |
+        yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "build-tools;33.0.2" > /dev/null 2>&1 || true
+        yes | $ANDROID_HOME/tools/bin/sdkmanager "build-tools;33.0.2" > /dev/null 2>&1 || true
+
     - name: 安装项目依赖
       run: npm install
 
