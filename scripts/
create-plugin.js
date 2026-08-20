@@ -1,0 +1,613 @@
+#!/usr/bin/env node
+/**
+ * 音轨 - 插件文件创建脚本
+ * 在 CI 中运行，自动创建所有插件文件
+ */
+const fs = require('fs');
+const path = require('path');
+
+const P = 'plugins/yingu-music-service';
+function w(file, content) {
+  const fp = path.join(P, file);
+  fs.mkdirSync(path.dirname(fp), { recursive: true });
+  fs.writeFileSync(fp, content, 'utf8');
+  console.log('  创建: ' + fp);
+}
+
+console.log('=== 创建音轨插件文件 ===');
+
+w('package.json', JSON.stringify({
+  name: "yingu-music-service",
+  version: "1.0.2",
+  description: "音轨音乐服务插件",
+  cordova: { id: "yingu-music-service", platforms: ["android"] },
+  author: "音轨",
+  license: "Apache-2.0"
+}, null, 0));
+
+w('plugin.xml', `<?xml version="1.0" encoding="UTF-8"?>
+<plugin xmlns="http://apache.org/cordova/ns/plugins/1.0" id="yingu-music-service" version="1.0.2">
+    <name>音轨 Music Service</name>
+    <description>音轨 - 后台音乐播放服务</description>
+    <license>Apache 2.0</license>
+    <js-module name="YinguMusic" src="www/YinguMusic.js">
+        <clobbers target="window.YinguMusic" />
+    </js-module>
+    <hook type="before_prepare" src="scripts/generate-icons.js" />
+    <hook type="before_build" src="scripts/modify_mainactivity.js" />
+    <hook type="after_platform_add" src="scripts/modify_mainactivity.js" />
+    <platform name="android">
+        <config-file target="app/src/main/AndroidManifest.xml" parent="/manifest">
+            <uses-permission android:name="android.permission.WAKE_LOCK" />
+            <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+            <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+            <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+        </config-file>
+        <config-file target="app/src/main/AndroidManifest.xml" parent="/manifest/application">
+            <service android:name="com.yingu.player.MusicService" android:exported="false" android:foregroundServiceType="mediaPlayback">
+                <intent-filter>
+                    <action android:name="android.intent.action.MEDIA_BUTTON" />
+                </intent-filter>
+            </service>
+        </config-file>
+        <source-file src="src/android/MusicService.java" target-dir="app/src/main/java/com/yingu/player" />
+        <source-file src="src/android/YinguMusicPlugin.java" target-dir="app/src/main/java/com/yingu/player" />
+        <resource-file src="src/android/res/drawable/ic_music_note.xml" target="app/src/main/res/drawable/ic_music_note.xml" />
+        <resource-file src="src/android/res/drawable/ic_play.xml" target="app/src/main/res/drawable/ic_play.xml" />
+        <resource-file src="src/android/res/drawable/ic_pause.xml" target="app/src/main/res/drawable/ic_pause.xml" />
+        <resource-file src="src/android/res/drawable/ic_skip_prev.xml" target="app/src/main/res/drawable/ic_skip_prev.xml" />
+        <resource-file src="src/android/res/drawable/ic_skip_next.xml" target="app/src/main/res/drawable/ic_skip_next.xml" />
+        <config-file target="app/src/main/AndroidManifest.xml" parent="/manifest/application">
+            <attribute name="android:networkSecurityConfig" value="@xml/network_security_config" />
+        </config-file>
+        <resource-file src="src/android/res/xml/network_security_config.xml" target="app/src/main/res/xml/network_security_config.xml" />
+    </platform>
+</plugin>`);
+
+w('www/YinguMusic.js', `var exec = require('cordova/exec');
+var YinguMusic = {
+    _controlCallback: null,
+    _onControl: function(action) {
+        if (YinguMusic._controlCallback) { YinguMusic._controlCallback(action); }
+    },
+    updatePlayback: function(isPlaying, trackName, trackIndex, trackTotal) {
+        exec(function(){}, function(){}, 'YinguMusic', 'updatePlayback', [isPlaying, trackName, trackIndex, trackTotal]);
+    },
+    startService: function() {
+        exec(function(){}, function(){}, 'YinguMusic', 'startService', []);
+    },
+    stopService: function() {
+        exec(function(){}, function(){}, 'YinguMusic', 'stopService', []);
+    },
+    onControl: function(callback) {
+        YinguMusic._controlCallback = callback;
+        exec(function(){}, function(){}, 'YinguMusic', 'registerControl', []);
+    }
+};
+module.exports = YinguMusic;`);
+
+// 矢量图标
+const vi = (d) => `<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24" android:tint="#FFFFFF"><path android:fillColor="#FFFFFF" android:pathData="${d}"/></vector>`;
+w('src/android/res/drawable/ic_music_note.xml', vi('M12,3v10.55c-0.59,-0.34 -1.27,-0.55 -2,-0.55 -2.21,0 -4,1.79 -4,4s1.79,4 4,4 4,-1.79 4,-4V7h4V3h-6z'));
+w('src/android/res/drawable/ic_play.xml', vi('M8,5v14l11,-7z'));
+w('src/android/res/drawable/ic_pause.xml', vi('M6,5h4v14H6zM14,5h4v14h-4z'));
+w('src/android/res/drawable/ic_skip_prev.xml', vi('M6,6h2v12H6zM9.5,12l8.5,6V6z'));
+w('src/android/res/drawable/ic_skip_next.xml', vi('M16,6h2v12h-2zM6,18l8.5,-6L6,6z'));
+
+w('src/android/res/xml/network_security_config.xml', `<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>`);
+
+w('src/android/YinguMusicPlugin.java', `package com.yingu.player;
+
+import org.apache.cordova.CordovaInterface;
+import org.apache.cordova.CordovaPlugin;
+import org.apache.cordova.CallbackContext;
+import org.apache.cordova.CordovaWebView;
+import org.apache.cordova.PluginResult;
+import org.json.JSONArray;
+import org.json.JSONException;
+
+import android.content.BroadcastReceiver;
+import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
+import android.os.Build;
+import android.util.Log;
+
+public class YinguMusicPlugin extends CordovaPlugin {
+    private static final String TAG = "YinguMusicPlugin";
+    private static CallbackContext controlCallback = null;
+
+    private final BroadcastReceiver serviceControlReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            if (intent.hasExtra("control")) {
+                String control = intent.getStringExtra("control");
+                sendControlToJs(control);
+            }
+        }
+    };
+
+    @Override
+    public void initialize(CordovaInterface cordova, CordovaWebView webView) {
+        super.initialize(cordova, webView);
+        IntentFilter filter = new IntentFilter("com.yingu.player.CONTROL");
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            cordova.getActivity().registerReceiver(serviceControlReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
+        } else {
+            cordova.getActivity().registerReceiver(serviceControlReceiver, filter);
+        }
+    }
+
+    @Override
+    public boolean execute(String action, JSONArray args, CallbackContext callbackContext) throws JSONException {
+        if ("updatePlayback".equals(action)) {
+            updatePlaybackState(args.getBoolean(0), args.getString(1), args.getInt(2), args.getInt(3));
+            callbackContext.success();
+        } else if ("startService".equals(action)) {
+            startMusicService();
+            callbackContext.success();
+        } else if ("stopService".equals(action)) {
+            stopMusicService();
+            callbackContext.success();
+        } else if ("registerControl".equals(action)) {
+            PluginResult result = new PluginResult(PluginResult.Status.NO_RESULT);
+            result.setKeepCallback(true);
+            callbackContext.sendPluginResult(result);
+            controlCallback = callbackContext;
+        }
+        return true;
+    }
+
+    private void updatePlaybackState(boolean isPlaying, String trackName, int trackIndex, int trackTotal) {
+        Context context = cordova.getActivity();
+        Intent intent = new Intent(context, MusicService.class);
+        intent.setAction(MusicService.ACTION_UPDATE);
+        intent.putExtra(MusicService.EXTRA_IS_PLAYING, isPlaying);
+        intent.putExtra(MusicService.EXTRA_TRACK_NAME, trackName);
+        intent.putExtra(MusicService.EXTRA_TRACK_INDEX, trackIndex);
+        intent.putExtra(MusicService.EXTRA_TRACK_TOTAL, trackTotal);
+        if (isPlaying) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) { context.startForegroundService(intent); }
+            else { context.startService(intent); }
+        } else { context.startService(intent); }
+    }
+
+    private void startMusicService() {
+        Context context = cordova.getActivity();
+        Intent intent = new Intent(context, MusicService.class);
+        intent.setAction(MusicService.ACTION_START);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) { context.startForegroundService(intent); }
+        else { context.startService(intent); }
+    }
+
+    private void stopMusicService() {
+        Context context = cordova.getActivity();
+        Intent intent = new Intent(context, MusicService.class);
+        intent.setAction(MusicService.ACTION_STOP);
+        context.startService(intent);
+    }
+
+    private void sendControlToJs(final String control) {
+        cordova.getActivity().runOnUiThread(() -> {
+            if (controlCallback != null) {
+                PluginResult result = new PluginResult(PluginResult.Status.OK, control);
+                result.setKeepCallback(true);
+                controlCallback.sendPluginResult(result);
+            }
+            String js = "javascript:if(window.YinguMusic && window.YinguMusic._onControl) window.YinguMusic._onControl('" + control + "');";
+            webView.loadUrl(js);
+        });
+    }
+
+    @Override
+    public void onDestroy() {
+        stopMusicService();
+        try { cordova.getActivity().unregisterReceiver(serviceControlReceiver); } catch (Exception e) {}
+        super.onDestroy();
+    }
+}`);
+
+w('src/android/MusicService.java', `package com.yingu.player;
+
+import android.app.Notification;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.app.PendingIntent;
+import android.app.Service;
+import android.content.BroadcastReceiver;
+import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
+import android.media.MediaMetadata;
+import android.media.session.MediaSession;
+import android.media.session.PlaybackState;
+import android.os.Build;
+import android.os.IBinder;
+import android.os.PowerManager;
+import android.util.Log;
+
+public class MusicService extends Service {
+    private static final String TAG = "MusicService";
+    private static final String CHANNEL_ID = "yingu_music_channel";
+    private static final int NOTIFICATION_ID = 1001;
+
+    public static final String ACTION_START = "com.yingu.player.START";
+    public static final String ACTION_STOP = "com.yingu.player.STOP";
+    public static final String ACTION_UPDATE = "com.yingu.player.UPDATE";
+    public static final String ACTION_TOGGLE = "com.yingu.player.TOGGLE";
+    public static final String ACTION_NEXT = "com.yingu.player.NEXT";
+    public static final String ACTION_PREV = "com.yingu.player.PREV";
+
+    public static final String EXTRA_IS_PLAYING = "isPlaying";
+    public static final String EXTRA_TRACK_NAME = "trackName";
+    public static final String EXTRA_TRACK_INDEX = "trackIndex";
+    public static final String EXTRA_TRACK_TOTAL = "trackTotal";
+
+    private MediaSession mediaSession;
+    private boolean isPlaying = false;
+    private String trackName = "\u97f3\u8f68";
+    private int trackIndex = 0;
+    private int trackTotal = 0;
+    private static volatile boolean sIsPlaying = false;
+    private PowerManager.WakeLock wakeLock;
+
+    private final BroadcastReceiver controlReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            String action = intent.getAction();
+            if (action == null) return;
+            String control = null;
+            if (ACTION_TOGGLE.equals(action)) control = "toggle";
+            else if (ACTION_NEXT.equals(action)) control = "next";
+            else if (ACTION_PREV.equals(action)) control = "prev";
+            if (control != null) sendControlToPlugin(control);
+        }
+    };
+
+    public static boolean isPlaybackActive() { return sIsPlaying; }
+
+    @Override
+    public void onCreate() {
+        super.onCreate();
+        createNotificationChannel();
+        registerControlReceiver();
+        setupMediaSession();
+        acquireWakeLock();
+    }
+
+    private void createNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            NotificationChannel channel = new NotificationChannel(CHANNEL_ID, "\u97f3\u8f68\u64ad\u653e", NotificationManager.IMPORTANCE_LOW);
+            channel.setDescription("\u97f3\u4e50\u64ad\u653e\u63a7\u5236");
+            channel.setShowBadge(false);
+            NotificationManager manager = getSystemService(NotificationManager.class);
+            if (manager != null) manager.createNotificationChannel(channel);
+        }
+    }
+
+    private void registerControlReceiver() {
+        IntentFilter filter = new IntentFilter();
+        filter.addAction(ACTION_TOGGLE);
+        filter.addAction(ACTION_NEXT);
+        filter.addAction(ACTION_PREV);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(controlReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
+        } else {
+            registerReceiver(controlReceiver, filter);
+        }
+    }
+
+    private void setupMediaSession() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) return;
+        mediaSession = new MediaSession(this, "\u97f3\u8f68");
+        mediaSession.setFlags(MediaSession.FLAG_HANDLES_MEDIA_BUTTONS | MediaSession.FLAG_HANDLES_TRANSPORT_CONTROLS);
+        mediaSession.setCallback(new MediaSession.Callback() {
+            @Override public void onPlay() { sendControlToPlugin("play"); }
+            @Override public void onPause() { sendControlToPlugin("pause"); }
+            @Override public void onSkipToNext() { sendControlToPlugin("next"); }
+            @Override public void onSkipToPrevious() { sendControlToPlugin("prev"); }
+            @Override public void onStop() { sendControlToPlugin("pause"); stopForeground(true); }
+        });
+        mediaSession.setActive(true);
+    }
+
+    private void acquireWakeLock() {
+        if (wakeLock == null) {
+            PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
+            if (pm != null) {
+                wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "\u97f3\u8f68:MusicServiceWakeLock");
+                wakeLock.setReferenceCounted(false);
+            }
+        }
+        if (wakeLock != null && !wakeLock.isHeld()) {
+            wakeLock.acquire(60 * 60 * 1000L);
+        }
+    }
+
+    private void releaseWakeLock() {
+        if (wakeLock != null && wakeLock.isHeld()) wakeLock.release();
+    }
+
+    @Override
+    public int onStartCommand(Intent intent, int flags, int startId) {
+        if (intent == null || intent.getAction() == null) return START_STICKY;
+        String action = intent.getAction();
+        if (ACTION_START.equals(action)) {
+            startForeground(NOTIFICATION_ID, buildNotification());
+            acquireWakeLock();
+        } else if (ACTION_UPDATE.equals(action)) {
+            isPlaying = intent.getBooleanExtra(EXTRA_IS_PLAYING, false);
+            trackName = intent.getStringExtra(EXTRA_TRACK_NAME);
+            if (trackName == null) trackName = "\u97f3\u8f68";
+            trackIndex = intent.getIntExtra(EXTRA_TRACK_INDEX, 0);
+            trackTotal = intent.getIntExtra(EXTRA_TRACK_TOTAL, 0);
+            sIsPlaying = isPlaying;
+            if (isPlaying) {
+                acquireWakeLock();
+                startForeground(NOTIFICATION_ID, buildNotification());
+            } else {
+                releaseWakeLock();
+                NotificationManager manager = getSystemService(NotificationManager.class);
+                if (manager != null) manager.notify(NOTIFICATION_ID, buildNotification());
+            }
+            updateMediaSession();
+        } else if (ACTION_STOP.equals(action)) {
+            sIsPlaying = false;
+            releaseWakeLock();
+            stopForeground(true);
+            stopSelf();
+        }
+        return START_STICKY;
+    }
+
+    private void updateMediaSession() {
+        if (mediaSession == null) return;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            MediaMetadata.Builder mb = new MediaMetadata.Builder();
+            mb.putString(MediaMetadata.METADATA_KEY_TITLE, trackName);
+            mb.putString(MediaMetadata.METADATA_KEY_ARTIST, "\u97f3\u8f68");
+            mediaSession.setMetadata(mb.build());
+            PlaybackState.Builder sb = new PlaybackState.Builder();
+            sb.setActions(PlaybackState.ACTION_PLAY | PlaybackState.ACTION_PAUSE | PlaybackState.ACTION_PLAY_PAUSE | PlaybackState.ACTION_SKIP_TO_NEXT | PlaybackState.ACTION_SKIP_TO_PREVIOUS | PlaybackState.ACTION_STOP);
+            sb.setState(isPlaying ? PlaybackState.STATE_PLAYING : PlaybackState.STATE_PAUSED, PlaybackState.PLAYBACK_POSITION_UNKNOWN, 1.0f);
+            mediaSession.setPlaybackState(sb.build());
+        }
+    }
+
+    @SuppressWarnings("deprecation")
+    private Notification buildNotification() {
+        Intent contentIntent = getPackageManager().getLaunchIntentForPackage(getPackageName());
+        PendingIntent contentPI = PendingIntent.getActivity(this, 0, contentIntent, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+        PendingIntent prevPI = buildPendingIntent(ACTION_PREV, 1);
+        PendingIntent togglePI = buildPendingIntent(ACTION_TOGGLE, 2);
+        PendingIntent nextPI = buildPendingIntent(ACTION_NEXT, 3);
+        Notification.Builder builder;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            builder = new Notification.Builder(this, CHANNEL_ID);
+        } else {
+            builder = new Notification.Builder(this);
+        }
+        builder.setSmallIcon(R.drawable.ic_music_note)
+                .setContentTitle(trackName)
+                .setContentText(trackTotal > 0 ? (trackIndex + "/" + trackTotal) : "\u97f3\u8f68")
+                .setContentIntent(contentPI)
+                .setShowWhen(false)
+                .setOngoing(isPlaying)
+                .setVisibility(Notification.VISIBILITY_PUBLIC)
+                .addAction(R.drawable.ic_skip_prev, "\u4e0a\u4e00\u66f2", prevPI)
+                .addAction(isPlaying ? R.drawable.ic_pause : R.drawable.ic_play, isPlaying ? "\u6682\u505c" : "\u64ad\u653e", togglePI)
+                .addAction(R.drawable.ic_skip_next, "\u4e0b\u4e00\u66f2", nextPI);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP && mediaSession != null) {
+            builder.setStyle(new Notification.MediaStyle().setMediaSession(mediaSession.getSessionToken()).setShowActionsInCompactView(0, 1, 2));
+        }
+        return builder.build();
+    }
+
+    private PendingIntent buildPendingIntent(String action, int requestCode) {
+        Intent intent = new Intent(action);
+        intent.setPackage(getPackageName());
+        return PendingIntent.getBroadcast(this, requestCode, intent, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+    }
+
+    private void sendControlToPlugin(final String control) {
+        new android.os.Handler(android.os.Looper.getMainLooper()).post(() -> {
+            Intent pluginIntent = new Intent("com.yingu.player.CONTROL");
+            pluginIntent.putExtra("control", control);
+            pluginIntent.setPackage(getPackageName());
+            sendBroadcast(pluginIntent);
+        });
+    }
+
+    @Override
+    public void onDestroy() {
+        super.onDestroy();
+        sIsPlaying = false;
+        releaseWakeLock();
+        try { unregisterReceiver(controlReceiver); } catch (Exception e) {}
+        if (mediaSession != null) { mediaSession.setActive(false); mediaSession.release(); }
+    }
+
+    @Override
+    public void onTaskRemoved(Intent rootIntent) {
+        sIsPlaying = false;
+        releaseWakeLock();
+        stopForeground(true);
+        stopSelf();
+        super.onTaskRemoved(rootIntent);
+    }
+
+    @Override
+    public IBinder onBind(Intent intent) { return null; }
+}`);
+
+w('scripts/generate-icons.js', `const fs = require('fs');
+const path = require('path');
+const { execSync } = require('child_process');
+
+const ICON_SIZES = {
+  'mipmap-mdpi': 48, 'mipmap-hdpi': 72, 'mipmap-xhdpi': 96,
+  'mipmap-xxhdpi': 144, 'mipmap-xxxhdpi': 192,
+};
+const FOREGROUND_SIZE = 432;
+const BG_COLOR = '#0a0a0a';
+const FG_COLOR = '#c0392b';
+
+function ensureDir(dir) { if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true }); }
+
+function generatePNG(filePath, size, bgColor, fgColor) {
+  ensureDir(path.dirname(filePath));
+  try {
+    execSync('convert -size ' + size + 'x' + size + ' xc:"' + bgColor + '" -fill "' + fgColor + '" -gravity center -pointsize ' + Math.floor(size*0.6) + ' -annotate 0 "\\u266A" "' + filePath + '"', { stdio: 'pipe' });
+    if (fs.existsSync(filePath) && fs.statSync(filePath).size > 100) return;
+  } catch (e) {}
+  try {
+    execSync('python3 -c "from PIL import Image,ImageDraw; img=Image.new(\\'RGBA\\',(' + size + ',' + size + '),(10,10,10,255)); d=ImageDraw.Draw(img); r=int(' + size + '*0.35); cx,cy=' + size + '//2,' + size + '//2; d.ellipse([cx-r,cy-r,cx+r,cy+r],fill=(3,3,3,255),outline=(192,57,43,255),width=max(2,' + size + '//48)); r2=max(3,' + size + '//24); d.ellipse([cx-r2,cy-r2,cx+r2,cy+r2],fill=(192,57,43,255)); img.save(\\'' + filePath.replace(/\\\\/g, '/') + '\\')"', { stdio: 'pipe' });
+    if (fs.existsSync(filePath) && fs.statSync(filePath).size > 100) return;
+  } catch (e) {}
+  const pngData = Buffer.from([0x89,0x50,0x4E,0x47,0x0D,0x0A,0x1A,0x0A,0x00,0x00,0x00,0x0D,0x49,0x48,0x44,0x52,0x00,0x00,0x00,0x01,0x00,0x00,0x00,0x01,0x08,0x02,0x00,0x00,0x00,0x90,0x77,0x53,0xDE,0x00,0x00,0x00,0x0C,0x49,0x44,0x41,0x54,0x08,0xD7,0x63,0xF8,0xCF,0xC0,0x00,0x00,0x00,0x03,0x00,0x01,0xB3,0x07,0x9E,0x3B,0x00,0x00,0x00,0x00,0x49,0x45,0x4E,0x44,0xAE,0x42,0x60,0x82]);
+  fs.writeFileSync(filePath, pngData);
+}
+
+const VECTOR_ICONS = {
+  'ic_play.xml': '<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24" android:tint="#FFFFFF"><path android:fillColor="#FFFFFF" android:pathData="M8,5v14l11,-7z"/></vector>',
+  'ic_pause.xml': '<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24" android:tint="#FFFFFF"><path android:fillColor="#FFFFFF" android:pathData="M6,5h4v14H6zM14,5h4v14h-4z"/></vector>',
+  'ic_skip_next.xml': '<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24" android:tint="#FFFFFF"><path android:fillColor="#FFFFFF" android:pathData="M16,6h2v12h-2zM6,18l8.5,-6L6,6z"/></vector>',
+  'ic_skip_prev.xml': '<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24" android:tint="#FFFFFF"><path android:fillColor="#FFFFFF" android:pathData="M6,6h2v12H6zM9.5,12l8.5,6V6z"/></vector>',
+  'ic_music_note.xml': '<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24" android:tint="#FFFFFF"><path android:fillColor="#FFFFFF" android:pathData="M12,3v10.55c-0.59,-0.34 -1.27,-0.55 -2,-0.55 -2.21,0 -4,1.79 -4,4s1.79,4 4,4 4,-1.79 4,-4V7h4V3h-6z"/></vector>',
+};
+
+function generateAllIcons(resDir) {
+  ensureDir(resDir);
+  for (const [dir, size] of Object.entries(ICON_SIZES)) {
+    const dirPath = path.join(resDir, dir);
+    ensureDir(dirPath);
+    const iconPath = path.join(dirPath, 'ic_launcher.png');
+    if (!fs.existsSync(iconPath) || fs.statSync(iconPath).size < 100) generatePNG(iconPath, size, BG_COLOR, FG_COLOR);
+    const roundPath = path.join(dirPath, 'ic_launcher_round.png');
+    if (!fs.existsSync(roundPath) || fs.statSync(roundPath).size < 100) fs.copyFileSync(iconPath, roundPath);
+  }
+  const drawableDir = path.join(resDir, 'drawable');
+  ensureDir(drawableDir);
+  const fgPath = path.join(drawableDir, 'ic_launcher_foreground.png');
+  if (!fs.existsSync(fgPath) || fs.statSync(fgPath).size < 100) generatePNG(fgPath, FOREGROUND_SIZE, BG_COLOR, FG_COLOR);
+  const anydpiDir = path.join(resDir, 'mipmap-anydpi-v26');
+  ensureDir(anydpiDir);
+  const lx = '<?xml version="1.0" encoding="utf-8"?>\\n<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">\\n    <background android:drawable="@drawable/ic_launcher_background" />\\n    <foreground android:drawable="@drawable/ic_launcher_foreground" />\\n</adaptive-icon>';
+  fs.writeFileSync(path.join(anydpiDir, 'ic_launcher.xml'), lx);
+  fs.writeFileSync(path.join(anydpiDir, 'ic_launcher_round.xml'), lx);
+  fs.writeFileSync(path.join(drawableDir, 'ic_launcher_background.xml'), '<?xml version="1.0" encoding="utf-8"?>\\n<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">\\n    <solid android:color="#0a0a0a"/>\\n</shape>');
+  for (const [name, content] of Object.entries(VECTOR_ICONS)) {
+    fs.writeFileSync(path.join(drawableDir, name), content);
+  }
+  const xmlDir = path.join(resDir, 'xml');
+  ensureDir(xmlDir);
+  const nscPath = path.join(xmlDir, 'network_security_config.xml');
+  if (!fs.existsSync(nscPath)) {
+    fs.writeFileSync(nscPath, '<?xml version="1.0" encoding="utf-8"?>\\n<network-security-config>\\n    <base-config cleartextTrafficPermitted="true">\\n        <trust-anchors>\\n            <certificates src="system" />\\n        </trust-anchors>\\n    </base-config>\\n</network-security-config>');
+  }
+}
+
+module.exports = function(context) {
+  let resDir = null;
+  if (context && context.opts && context.opts.projectRoot) {
+    const fp = path.join(context.opts.projectRoot, 'platforms', 'android');
+    if (fs.existsSync(fp)) resDir = path.join(fp, 'app', 'src', 'main', 'res');
+  }
+  if (!resDir) {
+    const cs = [path.join(process.cwd(), 'platforms', 'android', 'app', 'src', 'main', 'res'), path.join(process.cwd(), 'app', 'src', 'main', 'res')];
+    for (const c of cs) { if (fs.existsSync(path.dirname(c))) { resDir = c; break; } }
+  }
+  if (!resDir) resDir = path.join(process.cwd(), 'res', 'icon', 'android');
+  generateAllIcons(resDir);
+};`);
+
+w('scripts/modify_mainactivity.js', `const fs = require('fs');
+const path = require('path');
+
+const CUSTOM_MAIN_ACTIVITY = \`package PACKAGE_NAME;
+
+import android.os.Bundle;
+import android.util.Log;
+import org.apache.cordova.CordovaActivity;
+
+public class MainActivity extends CordovaActivity {
+    private static final String TAG = "MainActivity";
+
+    @Override
+    public void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        Bundle extras = getIntent().getExtras();
+        if (extras != null && extras.getBoolean("cdvStartInBackground", false)) {
+            moveTaskToBack(true);
+        }
+        loadUrl(launchUrl);
+    }
+
+    @Override
+    protected void onPause() {
+        try {
+            Class<?> serviceClass = Class.forName("com.yingu.player.MusicService");
+            boolean isPlaying = false;
+            try {
+                java.lang.reflect.Method m = serviceClass.getMethod("isPlaybackActive");
+                Object result = m.invoke(null);
+                isPlaying = result instanceof Boolean && (Boolean) result;
+            } catch (Exception e) {}
+            if (isPlaying && this.appView != null) {
+                super.onPause();
+                this.appView.handleResume(this.keepRunning);
+            } else {
+                super.onPause();
+            }
+        } catch (Exception e) {
+            super.onPause();
+        }
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (this.appView != null) {
+            this.appView.handleResume(this.keepRunning);
+        }
+    }
+}\`;
+
+module.exports = function(context) {
+    const projectRoot = context.opts.projectRoot || process.cwd();
+    const platformPath = path.join(projectRoot, 'platforms', 'android');
+    const manifestPath = path.join(platformPath, 'app', 'src', 'main', 'AndroidManifest.xml');
+    let packageName = 'com.yingu.player';
+    try {
+        if (fs.existsSync(manifestPath)) {
+            const manifest = fs.readFileSync(manifestPath, 'utf8');
+            const match = manifest.match(/package="([^"]+)"/);
+            if (match) packageName = match[1];
+        }
+    } catch (e) {}
+    const packagePath = packageName.replace(/\\./g, '/');
+    let mainActivityPath = path.join(platformPath, 'app', 'src', 'main', 'java', packagePath, 'MainActivity.java');
+    if (!fs.existsSync(mainActivityPath)) {
+        const javaDir = path.join(platformPath, 'app', 'src', 'main', 'java');
+        if (fs.existsSync(javaDir)) {
+            try {
+                const found = require('child_process').execSync('find "' + javaDir + '" -name "MainActivity.java" 2>/dev/null', { encoding: 'utf8' }).trim().split('\\n')[0].trim();
+                if (found && fs.existsSync(found)) mainActivityPath = found;
+            } catch (e2) {}
+        }
+    }
+    if (fs.existsSync(mainActivityPath)) {
+        const content = CUSTOM_MAIN_ACTIVITY.replace(/PACKAGE_NAME/g, packageName);
+        fs.writeFileSync(mainActivityPath, content, 'utf8');
+        console.log('[音轨 Hook] MainActivity.java 已替换: ' + mainActivityPath);
+    }
+};`);
+
+console.log('=== 插件文件创建完成 ===');
