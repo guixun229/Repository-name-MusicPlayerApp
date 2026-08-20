@@ -2057,7 +2057,6 @@ function renderImageGrid(gridId, images, indexKey, inputId, labelName) {
   };
   const opacityRow = document.getElementById(opacityRowMap[gridId]);
 
-  // 修正：显示所有有效图片（包括 blob URL）
   const validImages = images.filter(item => {
     if (typeof item === 'string') return item.length > 0;
     if (typeof item === 'object' && item !== null) {
@@ -2932,14 +2931,47 @@ document.getElementById('labelImgOpacitySlider').addEventListener('input', e => 
   saveAllData();
 });
 
-// ==================== Import / Export (修复：支持导出音频文件) ====================
+// ==================== Import / Export (修改后：导出/导入所有数据，包括图片) ====================
+
+// 辅助函数：将 blob URL 转换为 base64
+async function blobUrlToBase64(url) {
+  try {
+    const response = await fetch(url);
+    const blob = await response.blob();
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result);
+      reader.readAsDataURL(blob);
+    });
+  } catch (e) {
+    console.warn('blob转base64失败:', e);
+    return null;
+  }
+}
+
+// 辅助函数：将 base64 还原为 blob 并存入 IndexedDB
+async function base64ToBlobAndStore(dataUrl, fileKey) {
+  try {
+    const response = await fetch(dataUrl);
+    const blob = await response.blob();
+    await dbPut(fileKey, blob);
+    return blob;
+  } catch (e) {
+    console.warn('base64还原失败:', e);
+    return null;
+  }
+}
+
+// 导出按钮
 document.getElementById('exportBtn').addEventListener('click', async () => {
-  if (tracks.length === 0) { showToast('暂无曲目可导出'); return; }
+  if (tracks.length === 0 && settings.bgImages.length === 0 && settings.recordImages.length === 0 && settings.labelImages.length === 0) {
+    showToast('暂无任何数据可导出');
+    return;
+  }
 
-  // 显示进度提示
-  showToast('正在打包导出...');
+  showToast('正在打包数据...');
 
-  // 构建导出数据，将 blob 音频转为 base64
+  // 1. 处理音频数据
   const exportTracks = [];
   for (const t of tracks) {
     const item = {
@@ -2949,28 +2981,42 @@ document.getElementById('exportBtn').addEventListener('click', async () => {
       categoryId: t.categoryId
     };
 
-    // 如果是本地 blob，读取为 base64
     if (t.src && t.src.startsWith('blob:')) {
-      try {
-        const response = await fetch(t.src);
-        const blob = await response.blob();
-        const reader = new FileReader();
-        const base64 = await new Promise((resolve) => {
-          reader.onloadend = () => resolve(reader.result);
-          reader.readAsDataURL(blob);
-        });
-        item.srcData = base64;   // 保存 base64 数据
-        item.mimeType = blob.type || 'audio/mpeg';
-      } catch (e) {
-        console.warn('导出音频失败:', t.name, e);
-        item.src = t.src; // 降级保留原 URL
+      const base64 = await blobUrlToBase64(t.src);
+      if (base64) {
+        item.srcData = base64;
+        item.mimeType = 'audio/mpeg'; // 可根据实际类型调整
+      } else {
+        item.src = t.src; // 保留原 URL（可能失效）
       }
     } else {
-      // 网络资源或已失效的 blob，保留原 src
-      item.src = t.src;
+      item.src = t.src || '';
     }
     exportTracks.push(item);
   }
+
+  // 2. 处理自定义图片（bgImages, recordImages, labelImages）
+  async function processImages(imgList) {
+    const result = [];
+    for (const img of imgList) {
+      const url = typeof img === 'string' ? img : (img && img.url ? img.url : '');
+      if (url && url.startsWith('blob:')) {
+        const base64 = await blobUrlToBase64(url);
+        if (base64) {
+          result.push({ srcData: base64 });
+        } else {
+          result.push({ src: url }); // 保留原引用
+        }
+      } else if (url) {
+        result.push({ src: url }); // 网络图片或本地路径
+      }
+    }
+    return result;
+  }
+
+  const exportBg = await processImages(settings.bgImages);
+  const exportRecord = await processImages(settings.recordImages);
+  const exportLabel = await processImages(settings.labelImages);
 
   const exportData = {
     app: '音轨',
@@ -2981,8 +3027,24 @@ document.getElementById('exportBtn').addEventListener('click', async () => {
     settings: {
       bgColor: settings.bgColor,
       recordColor: settings.recordColor,
-      labelColor: settings.labelColor
-    }
+      labelColor: settings.labelColor,
+      bgOpacity: settings.bgOpacity,
+      recordOpacity: settings.recordOpacity,
+      labelOpacity: settings.labelOpacity,
+      bgOpacityImage: settings.bgOpacityImage,
+      recordOpacityImage: settings.recordOpacityImage,
+      labelOpacityImage: settings.labelOpacityImage,
+      bgImageIndex: settings.bgImageIndex,
+      recordImageIndex: settings.recordImageIndex,
+      labelImageIndex: settings.labelImageIndex,
+      bgImages: exportBg,
+      recordImages: exportRecord,
+      labelImages: exportLabel
+    },
+    // 导出播放状态
+    currentCategoryId: currentCategoryId,
+    currentIndex: currentIndex,
+    playMode: playMode
   };
 
   const json = JSON.stringify(exportData, null, 2);
@@ -2990,14 +3052,15 @@ document.getElementById('exportBtn').addEventListener('click', async () => {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `音轨_导出_${new Date().toISOString().slice(0, 10)}.json`;
+  a.download = `音轨_完整数据_${new Date().toISOString().slice(0, 10)}.json`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
-  showToast(`已导出 ${tracks.length} 首曲目（含本地音频）`);
+  showToast('数据已导出（含音频和图片）');
 });
 
+// 导入按钮
 document.getElementById('importBtn').addEventListener('click', () => {
   document.getElementById('importInput').click();
 });
@@ -3011,16 +3074,20 @@ document.getElementById('importInput').addEventListener('change', async e => {
     const text = await file.text();
     const data = JSON.parse(text);
 
-    if (!data.tracks || !Array.isArray(data.tracks)) {
+    if (!data.tracks && !data.settings) {
       showToast('文件格式不正确');
       return;
     }
 
-    let msg = `找到 ${data.tracks.length} 首曲目`;
-    msg += '\n\n确定导入吗？\n导入后将替换当前曲目列表';
+    let msg = '将导入以下数据：';
+    if (data.tracks) msg += `\n- ${data.tracks.length} 首曲目`;
+    if (data.settings && data.settings.bgImages) msg += `\n- ${data.settings.bgImages.length} 张背景图片`;
+    if (data.settings && data.settings.recordImages) msg += `\n- ${data.settings.recordImages.length} 张唱片图片`;
+    if (data.settings && data.settings.labelImages) msg += `\n- ${data.settings.labelImages.length} 张标签图片`;
+    msg += '\n\n这将替换当前所有数据，确定继续吗？';
 
     const confirmed = await showModal({
-      title: '导入曲目',
+      title: '导入数据',
       bodyHTML: msg.replace(/\n/g, '<br>'),
       buttons: [
         { text: '取消', value: false, style: 'cancel' },
@@ -3033,39 +3100,38 @@ document.getElementById('importInput').addEventListener('change', async e => {
     pause();
     currentMedia.src = '';
 
-    // 处理导入的 tracks
-    const newTracks = [];
-    for (const t of data.tracks) {
-      let src = t.src || '';
-      let fileKey = null;
+    // ---- 恢复 tracks ----
+    if (data.tracks) {
+      const newTracks = [];
+      for (const t of data.tracks) {
+        let src = t.src || '';
+        let fileKey = null;
 
-      // 如果包含 srcData，还原为 blob
-      if (t.srcData && t.srcData.startsWith('data:')) {
-        try {
-          const response = await fetch(t.srcData);
-          const blob = await response.blob();
-          fileKey = 'audio-import-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
-          await dbPut(fileKey, blob);
-          src = URL.createObjectURL(blob);
-        } catch (e) {
-          console.warn('还原音频失败:', t.name, e);
-          src = ''; // 还原失败，留空
+        if (t.srcData && t.srcData.startsWith('data:')) {
+          const key = 'audio-import-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+          const blob = await base64ToBlobAndStore(t.srcData, key);
+          if (blob) {
+            src = URL.createObjectURL(blob);
+            fileKey = key;
+          } else {
+            src = ''; // 还原失败
+          }
         }
-      }
 
-      newTracks.push({
-        id: t.id || nextTrackId++,
-        name: t.name || '未命名',
-        src: src,
-        type: t.type || 'audio',
-        categoryId: t.categoryId || 'cat-0',
-        _fileKey: fileKey
-      });
+        newTracks.push({
+          id: t.id || nextTrackId++,
+          name: t.name || '未命名',
+          src: src,
+          type: t.type || 'audio',
+          categoryId: t.categoryId || 'cat-0',
+          _fileKey: fileKey
+        });
+      }
+      tracks = newTracks;
+      nextTrackId = tracks.length;
     }
 
-    tracks = newTracks;
-    nextTrackId = tracks.length;
-
+    // ---- 恢复 categories ----
     if (data.categories && Array.isArray(data.categories)) {
       const hasDefault = data.categories.some(c => c.id === 'cat-0');
       if (!hasDefault) data.categories.unshift({ id: 'cat-0', name: '默认' });
@@ -3076,26 +3142,66 @@ document.getElementById('importInput').addEventListener('change', async e => {
       })) + 1;
     }
 
+    // ---- 恢复 settings（含图片） ----
     if (data.settings) {
-      if (data.settings.bgColor) settings.bgColor = data.settings.bgColor;
-      if (data.settings.recordColor) settings.recordColor = data.settings.recordColor;
-      if (data.settings.labelColor) settings.labelColor = data.settings.labelColor;
-      applySettings();
+      const s = data.settings;
+      if (s.bgColor) settings.bgColor = s.bgColor;
+      if (s.recordColor) settings.recordColor = s.recordColor;
+      if (s.labelColor) settings.labelColor = s.labelColor;
+      if (s.bgOpacity !== undefined) settings.bgOpacity = s.bgOpacity;
+      if (s.recordOpacity !== undefined) settings.recordOpacity = s.recordOpacity;
+      if (s.labelOpacity !== undefined) settings.labelOpacity = s.labelOpacity;
+      if (s.bgOpacityImage !== undefined) settings.bgOpacityImage = s.bgOpacityImage;
+      if (s.recordOpacityImage !== undefined) settings.recordOpacityImage = s.recordOpacityImage;
+      if (s.labelOpacityImage !== undefined) settings.labelOpacityImage = s.labelOpacityImage;
+      if (s.bgImageIndex !== undefined) settings.bgImageIndex = s.bgImageIndex;
+      if (s.recordImageIndex !== undefined) settings.recordImageIndex = s.recordImageIndex;
+      if (s.labelImageIndex !== undefined) settings.labelImageIndex = s.labelImageIndex;
+
+      // 恢复图片列表（含 base64）
+      async function restoreImages(imgList) {
+        const result = [];
+        for (const img of imgList) {
+          if (img.srcData && img.srcData.startsWith('data:')) {
+            const key = 'img-import-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+            const blob = await base64ToBlobAndStore(img.srcData, key);
+            if (blob) {
+              result.push({ url: URL.createObjectURL(blob), _fileKey: key });
+            }
+          } else if (img.src) {
+            result.push(img.src); // 网络图片或路径
+          }
+        }
+        return result;
+      }
+
+      if (s.bgImages) settings.bgImages = await restoreImages(s.bgImages);
+      if (s.recordImages) settings.recordImages = await restoreImages(s.recordImages);
+      if (s.labelImages) settings.labelImages = await restoreImages(s.labelImages);
+
+      // 修正索引
+      if (settings.bgImageIndex >= settings.bgImages.length) settings.bgImageIndex = settings.bgImages.length - 1;
+      if (settings.recordImageIndex >= settings.recordImages.length) settings.recordImageIndex = settings.recordImages.length - 1;
+      if (settings.labelImageIndex >= settings.labelImages.length) settings.labelImageIndex = settings.labelImages.length - 1;
     }
 
-    currentCategoryId = 'cat-0';
-    currentIndex = 0;
+    // 恢复播放状态
+    if (data.currentCategoryId) currentCategoryId = data.currentCategoryId;
+    if (data.playMode) playMode = data.playMode;
+    if (data.currentIndex !== undefined && data.currentIndex < tracks.length) {
+      currentIndex = data.currentIndex;
+    }
 
+    applySettings();
+    renderCategoryBar();
     if (tracks.length > 0) {
-      loadTrack(0);
+      loadTrack(currentIndex);
     } else {
       labelText.textContent = '音轨';
     }
-
-    renderCategoryBar();
     updateTrackList();
     saveAllData();
-    showToast(`已导入 ${tracks.length} 首曲目`);
+    showToast(`导入成功！共 ${tracks.length} 首曲目`);
   } catch (err) {
     console.error(err);
     showToast('导入失败：文件格式错误');
