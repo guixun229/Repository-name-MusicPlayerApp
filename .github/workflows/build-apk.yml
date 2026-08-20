@@ -21,6 +21,25 @@ jobs:
       - name: Add Android platform
         run: npx cap add android
 
+      - name: Copy native files to Android
+        run: |
+          # 创建 Java 包目录（包名必须和 capacitor.config.json 里的 appId 一致）
+          mkdir -p android/app/src/main/java/com/yourcompany/musicplayer
+
+          # 从根目录复制 Java 文件
+          cp MainActivity.java android/app/src/main/java/com/yourcompany/musicplayer/ 2>/dev/null || true
+          cp MusicService.java android/app/src/main/java/com/yourcompany/musicplayer/ 2>/dev/null || true
+          cp YinguMusicPlugin.java android/app/src/main/java/com/yourcompany/musicplayer/ 2>/dev/null || true
+
+          # 复制配置文件到 Android 目录
+          mkdir -p android/app/src/main/res/xml
+          cp config.xml android/app/src/main/res/xml/ 2>/dev/null || true
+          cp plugin.xml android/app/src/main/res/xml/ 2>/dev/null || true
+
+          # 复制 JS 插件文件
+          mkdir -p android/app/src/main/assets/public
+          cp YinguMusic.js android/app/src/main/assets/public/ 2>/dev/null || true
+
       - name: Generate Android assets
         run: npx capacitor-assets generate --android
 
