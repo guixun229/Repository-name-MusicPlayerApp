@@ -1676,6 +1676,26 @@ function _serializeData() {
     return copy;
   });
 
+  // 🔧 FIX: 统一处理图片序列化，优先使用 _fileKey
+  function serializeImageList(arr) {
+    return arr.map((item, i) => {
+      if (typeof item === 'object' && item !== null) {
+        if (item._fileKey) return 'idb:' + item._fileKey;
+        if (item.url && item.url.startsWith('blob:')) {
+          return 'idb:' + (item._fileKey || 'img-' + i + '-' + Date.now());
+        }
+        return item.url || '';
+      }
+      if (typeof item === 'string') {
+        if (item.startsWith('blob:')) {
+          return ''; // blob URL 不能跨会话，丢弃
+        }
+        return item;
+      }
+      return '';
+    });
+  }
+
   const settingsData = {
     bgColor: settings.bgColor,
     bgOpacity: settings.bgOpacity,
@@ -1689,30 +1709,9 @@ function _serializeData() {
     bgOpacityImage: settings.bgOpacityImage,
     recordOpacityImage: settings.recordOpacityImage,
     labelOpacityImage: settings.labelOpacityImage,
-    bgImages: settings.bgImages.map((item, i) => {
-      const url = typeof item === 'string' ? item : (item && item.url);
-      if (url && url.startsWith('blob:')) {
-        const key = typeof item === 'object' && item._fileKey ? item._fileKey : 'img-bg-' + i;
-        return 'idb:' + key;
-      }
-      return url || '';
-    }),
-    recordImages: settings.recordImages.map((item, i) => {
-      const url = typeof item === 'string' ? item : (item && item.url);
-      if (url && url.startsWith('blob:')) {
-        const key = typeof item === 'object' && item._fileKey ? item._fileKey : 'img-rec-' + i;
-        return 'idb:' + key;
-      }
-      return url || '';
-    }),
-    labelImages: settings.labelImages.map((item, i) => {
-      const url = typeof item === 'string' ? item : (item && item.url);
-      if (url && url.startsWith('blob:')) {
-        const key = typeof item === 'object' && item._fileKey ? item._fileKey : 'img-lbl-' + i;
-        return 'idb:' + key;
-      }
-      return url || '';
-    })
+    bgImages: serializeImageList(settings.bgImages),
+    recordImages: serializeImageList(settings.recordImages),
+    labelImages: serializeImageList(settings.labelImages)
   };
 
   return {
@@ -1735,10 +1734,7 @@ function _doSave() {
     localStorage.setItem(LS_KEY, jsonStr);
     // 写入文件（异步备份）
     saveToFile(jsonStr);
-    // 写入 Android SharedPreferences（同步，最可靠）
-    if (_deviceReady && window.YinguMusic && window.YinguMusic.saveData) {
-      try { YinguMusic.saveData(jsonStr); } catch(e) { console.warn('[持久化] Native保存失败:', e); }
-    }
+    // 🔧 FIX: 移除重复的 Native 调用，避免重复写入（由 _saveToNative 负责）
     console.log('[持久化] 数据已保存:', data.tracks.length, '首曲目');
   } catch (e) {
     console.error('[持久化] 保存失败:', e);
@@ -1828,49 +1824,38 @@ async function loadAllData() {
       if (s.recordOpacityImage !== undefined) settings.recordOpacityImage = s.recordOpacityImage;
       if (s.labelOpacityImage !== undefined) settings.labelOpacityImage = s.labelOpacityImage;
 
-      // 恢复图片
-      if (s.bgImages) {
-        settings.bgImages = [];
-        for (let i = 0; i < s.bgImages.length; i++) {
-          const ref = s.bgImages[i];
-          if (ref && ref.startsWith('idb:')) {
+      // 🔧 FIX: 恢复图片，跳过无效引用
+      async function restoreImageList(refs) {
+        const result = [];
+        for (const ref of refs) {
+          if (typeof ref === 'string' && ref.startsWith('idb:')) {
             try {
               const blob = await dbGet(ref.substring(4));
-              settings.bgImages.push(blob ? { url: URL.createObjectURL(blob), _fileKey: ref.substring(4) } : { url: '', _fileKey: null });
-            } catch (e) { settings.bgImages.push({ url: '', _fileKey: null }); }
-          } else {
-            settings.bgImages.push(ref);
+              if (blob) {
+                result.push({ url: URL.createObjectURL(blob), _fileKey: ref.substring(4) });
+              } else {
+                // 🔧 FIX: 文件丢失，跳过，不添加空对象
+                console.warn('[持久化] 图片文件未找到:', ref);
+              }
+            } catch (e) {
+              console.warn('[持久化] 读取图片失败:', ref);
+            }
+          } else if (typeof ref === 'string' && ref.length > 0 && !ref.startsWith('blob:')) {
+            // 网络图片或本地路径，直接保留
+            result.push(ref);
           }
         }
+        return result;
       }
-      if (s.recordImages) {
-        settings.recordImages = [];
-        for (let i = 0; i < s.recordImages.length; i++) {
-          const ref = s.recordImages[i];
-          if (ref && ref.startsWith('idb:')) {
-            try {
-              const blob = await dbGet(ref.substring(4));
-              settings.recordImages.push(blob ? { url: URL.createObjectURL(blob), _fileKey: ref.substring(4) } : { url: '', _fileKey: null });
-            } catch (e) { settings.recordImages.push({ url: '', _fileKey: null }); }
-          } else {
-            settings.recordImages.push(ref);
-          }
-        }
-      }
-      if (s.labelImages) {
-        settings.labelImages = [];
-        for (let i = 0; i < s.labelImages.length; i++) {
-          const ref = s.labelImages[i];
-          if (ref && ref.startsWith('idb:')) {
-            try {
-              const blob = await dbGet(ref.substring(4));
-              settings.labelImages.push(blob ? { url: URL.createObjectURL(blob), _fileKey: ref.substring(4) } : { url: '', _fileKey: null });
-            } catch (e) { settings.labelImages.push({ url: '', _fileKey: null }); }
-          } else {
-            settings.labelImages.push(ref);
-          }
-        }
-      }
+
+      if (s.bgImages) settings.bgImages = await restoreImageList(s.bgImages);
+      if (s.recordImages) settings.recordImages = await restoreImageList(s.recordImages);
+      if (s.labelImages) settings.labelImages = await restoreImageList(s.labelImages);
+
+      // 修正索引越界
+      if (settings.bgImageIndex >= settings.bgImages.length) settings.bgImageIndex = settings.bgImages.length - 1;
+      if (settings.recordImageIndex >= settings.recordImages.length) settings.recordImageIndex = settings.recordImages.length - 1;
+      if (settings.labelImageIndex >= settings.labelImages.length) settings.labelImageIndex = settings.labelImages.length - 1;
     }
 
     // 恢复播放位置（不自动播放，只恢复索引）
@@ -2012,9 +1997,17 @@ function applySettings() {
   // Background image with opacity
   if (settings.bgImages.length > 0 && settings.bgImageIndex >= 0 && settings.bgImageIndex < settings.bgImages.length) {
     const imgItem = settings.bgImages[settings.bgImageIndex];
-    const imgUrl = typeof imgItem === 'string' ? imgItem : imgItem.url;
-    const imgOpacity = settings.bgOpacityImage;
-    playerView.style.background = `linear-gradient(rgba(0,0,0,${1 - imgOpacity}), rgba(0,0,0,${1 - imgOpacity + 0.1})), url('${imgUrl}') center / cover no-repeat`;
+    const imgUrl = typeof imgItem === 'string' ? imgItem : (imgItem && imgItem.url ? imgItem.url : '');
+    if (imgUrl) {
+      const imgOpacity = settings.bgOpacityImage;
+      playerView.style.background = `linear-gradient(rgba(0,0,0,${1 - imgOpacity}), rgba(0,0,0,${1 - imgOpacity + 0.1})), url('${imgUrl}') center / cover no-repeat`;
+    } else {
+      // 图片 URL 无效，回退到纯色
+      const bgAlpha = settings.bgOpacity;
+      const bgColorRgba = hexToRgba(settings.bgColor, bgAlpha);
+      const bgMidRgba = hexToRgba(adjustColor(settings.bgColor, 16), bgAlpha);
+      playerView.style.background = `radial-gradient(ellipse at 50% 45%, ${bgMidRgba} 0%, ${bgColorRgba} 50%, rgba(5,5,5,${bgAlpha}) 100%)`;
+    }
   } else {
     // Background color with opacity
     const bgAlpha = settings.bgOpacity;
@@ -2034,10 +2027,14 @@ function applySettings() {
   if (recordImgEl) {
     if (settings.recordImages.length > 0 && settings.recordImageIndex >= 0 && settings.recordImageIndex < settings.recordImages.length) {
       const recItem = settings.recordImages[settings.recordImageIndex];
-      const recUrl = typeof recItem === 'string' ? recItem : recItem.url;
-      recordImgEl.style.backgroundImage = `url('${recUrl}')`;
-      recordImgEl.style.opacity = settings.recordOpacityImage;
-      recordImgEl.style.display = 'block';
+      const recUrl = typeof recItem === 'string' ? recItem : (recItem && recItem.url ? recItem.url : '');
+      if (recUrl) {
+        recordImgEl.style.backgroundImage = `url('${recUrl}')`;
+        recordImgEl.style.opacity = settings.recordOpacityImage;
+        recordImgEl.style.display = 'block';
+      } else {
+        recordImgEl.style.display = 'none';
+      }
     } else {
       recordImgEl.style.display = 'none';
     }
@@ -2048,10 +2045,14 @@ function applySettings() {
   if (labelImgEl) {
     if (settings.labelImages.length > 0 && settings.labelImageIndex >= 0 && settings.labelImageIndex < settings.labelImages.length) {
       const lblItem = settings.labelImages[settings.labelImageIndex];
-      const lblUrl = typeof lblItem === 'string' ? lblItem : lblItem.url;
-      labelImgEl.style.backgroundImage = `url('${lblUrl}')`;
-      labelImgEl.style.opacity = settings.labelOpacityImage;
-      labelImgEl.style.display = 'block';
+      const lblUrl = typeof lblItem === 'string' ? lblItem : (lblItem && lblItem.url ? lblItem.url : '');
+      if (lblUrl) {
+        labelImgEl.style.backgroundImage = `url('${lblUrl}')`;
+        labelImgEl.style.opacity = settings.labelOpacityImage;
+        labelImgEl.style.display = 'block';
+      } else {
+        labelImgEl.style.display = 'none';
+      }
     } else {
       labelImgEl.style.display = 'none';
     }
@@ -2093,7 +2094,17 @@ function renderImageGrid(gridId, images, indexKey, inputId, labelName) {
   };
   const opacityRow = document.getElementById(opacityRowMap[gridId]);
 
-  images.forEach((imgUrl, idx) => {
+  // 🔧 FIX: 过滤掉无效的图片项（空字符串或没有 url 的对象）
+  const validImages = images.filter(item => {
+    if (typeof item === 'string') return item.length > 0 && !item.startsWith('blob:');
+    if (typeof item === 'object' && item !== null) {
+      return item.url && item.url.length > 0 && !item.url.startsWith('blob:');
+    }
+    return false;
+  });
+
+  validImages.forEach((imgItem, idx) => {
+    const imgUrl = typeof imgItem === 'string' ? imgItem : imgItem.url;
     const item = document.createElement('div');
     item.className = 'bg-image-preview' + (idx === settings[indexKey] ? ' selected' : '');
     item.style.backgroundImage = `url('${imgUrl}')`;
@@ -2118,6 +2129,7 @@ function renderImageGrid(gridId, images, indexKey, inputId, labelName) {
         settings[indexKey] = images.length - 1;
       }
       applySettings();
+      saveAllData();
       showToast('图片已移除');
     });
     item.appendChild(removeMini);
@@ -2125,6 +2137,7 @@ function renderImageGrid(gridId, images, indexKey, inputId, labelName) {
     item.addEventListener('click', () => {
       settings[indexKey] = idx;
       applySettings();
+      saveAllData();
     });
 
     grid.appendChild(item);
@@ -2144,7 +2157,7 @@ function renderImageGrid(gridId, images, indexKey, inputId, labelName) {
 
   // Show/hide opacity slider
   if (opacityRow) {
-    opacityRow.style.display = (images.length > 0) ? '' : 'none';
+    opacityRow.style.display = (validImages.length > 0) ? '' : 'none';
   }
 }
 
@@ -2422,8 +2435,8 @@ document.addEventListener('resume', () => {
 
 // pagehide - 确保后台播放状态正确，并保存数据
 window.addEventListener('pagehide', (event) => {
-  _saveToNative(); // Native 同步保存
-  _doSave(); // 文件/localStorage 保存
+  _saveToNative();
+  _doSave();
   if (isPlaying) {
     // 确保浏览器知道我们正在播放，应该在后台继续
     if ('mediaSession' in navigator) {
@@ -2479,7 +2492,7 @@ function updateMediaSession() {
     // Use record image if available
     if (settings.recordImages.length > 0 && settings.recordImageIndex >= 0) {
       const recItem = settings.recordImages[settings.recordImageIndex];
-      const recUrl = typeof recItem === 'string' ? recItem : (recItem && recItem.url);
+      const recUrl = typeof recItem === 'string' ? recItem : (recItem && recItem.url ? recItem.url : '');
       if (recUrl) artwork.unshift({ src: recUrl, sizes: '512x512', type: 'image/jpeg' });
     }
     navigator.mediaSession.metadata = new MediaMetadata({
@@ -2539,8 +2552,38 @@ function loadTrack(index) {
     prevMedia.pause();
     prevMedia.currentTime = 0;
   }
-  currentMedia.src = track.src;
-  currentMedia.load();
+
+  // 🔧 FIX: 如果 src 为空，尝试从 IndexedDB 重新加载
+  if (!track.src && track._fileKey) {
+    (async () => {
+      try {
+        const blob = _db ? await dbGet(track._fileKey) : null;
+        if (blob) {
+          track.src = URL.createObjectURL(blob);
+          currentMedia.src = track.src;
+          currentMedia.load();
+          labelText.textContent = track.name;
+          updateTrackList();
+          updateMediaSession();
+          updateProgress();
+          saveAllData();
+          showToast('已恢复音频文件');
+        } else {
+          showToast('音频文件已丢失');
+        }
+      } catch (e) {
+        showToast('加载音频失败');
+      }
+    })();
+    return;
+  }
+
+  currentMedia.src = track.src || '';
+  if (currentMedia.src) {
+    currentMedia.load();
+  } else {
+    showToast('音频文件不可用');
+  }
   labelText.textContent = track.name;
   updateTrackList();
   updateMediaSession();
@@ -2550,6 +2593,11 @@ function loadTrack(index) {
 
 function play() {
   if (tracks.length === 0) { showToast('请先添加曲目'); return; }
+  const track = tracks[currentIndex];
+  if (!track.src && track._fileKey) {
+    loadTrack(currentIndex); // 尝试重新加载
+    return;
+  }
   isPlaying = true;
   targetSpeed = PLAY_SPEED;
   startAnimation();
