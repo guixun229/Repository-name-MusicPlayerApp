@@ -1713,9 +1713,14 @@ function _doSave() {
       version: 2
     };
 
-    localStorage.setItem(LS_KEY, JSON.stringify(data));
-    // 同时写入文件（更可靠，app 被杀也不会丢）
-    saveToFile(JSON.stringify(data));
+    const jsonStr = JSON.stringify(data);
+    localStorage.setItem(LS_KEY, jsonStr);
+    // 写入文件（异步备份）
+    saveToFile(jsonStr);
+    // 写入 Android SharedPreferences（同步，最可靠）
+    if (window.YinguMusic && window.YinguMusic.saveData) {
+      try { YinguMusic.saveData(jsonStr); } catch(e) { console.warn('[持久化] Native保存失败:', e); }
+    }
     console.log('[持久化] 数据已保存:', tracksData.length, '首曲目');
   } catch (e) {
     console.error('[持久化] 保存失败:', e);
@@ -1725,8 +1730,28 @@ function _doSave() {
 // 加载持久化数据
 async function loadAllData() {
   try {
-    // 优先从文件加载（更可靠），失败则用 localStorage
-    let raw = await loadFromFile();
+    // 1. 优先从 Android SharedPreferences 加载（最可靠）
+    let raw = null;
+    if (window.YinguMusic && window.YinguMusic.loadData) {
+      try {
+        raw = await new Promise((resolve) => {
+          YinguMusic.loadData(function(result) {
+            resolve(result && result.length > 0 ? result : null);
+          }, function() { resolve(null); });
+        });
+        if (raw) console.log('[持久化] 从 SharedPreferences 加载成功');
+      } catch(e) { console.warn('[持久化] SharedPreferences 加载失败:', e); }
+    }
+    // 2. 回退到文件
+    if (!raw) {
+      raw = await loadFromFile();
+      if (raw) console.log('[持久化] 从文件加载成功');
+    }
+    // 3. 回退到 localStorage
+    if (!raw) {
+      raw = localStorage.getItem(LS_KEY);
+      if (raw) console.log('[持久化] 从 localStorage 加载成功');
+    }
     if (!raw) {
       console.log('[持久化] 无历史数据，使用默认');
       return false;
