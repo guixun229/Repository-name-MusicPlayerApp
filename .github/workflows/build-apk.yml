@@ -1,42 +1,105 @@
-name: Build APK
+                    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+                    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+                    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+                </config-file>
+                <config-file target="app/src/main/AndroidManifest.xml" parent="/manifest/application">
+                    <service android:name="com.yingu.player.MusicService" android:exported="false" android:foregroundServiceType="mediaPlayback">
+                        <intent-filter>
+                            <action android:name="android.intent.action.MEDIA_BUTTON" />
+                        </intent-filter>
+                    </service>
+                </config-file>
+                <source-file src="src/android/MusicService.java" target-dir="app/src/main/java/com/yingu/player" />
+                <source-file src="src/android/YinguMusicPlugin.java" target-dir="app/src/main/java/com/yingu/player" />
+                <resource-file src="src/android/res/drawable/ic_music_note.xml" target="app/src/main/res/drawable/ic_music_note.xml" />
+                <resource-file src="src/android/res/drawable/ic_play.xml" target="app/src/main/res/drawable/ic_play.xml" />
+                <resource-file src="src/android/res/drawable/ic_pause.xml" target="app/src/main/res/drawable/ic_pause.xml" />
+                <resource-file src="src/android/res/drawable/ic_skip_prev.xml" target="app/src/main/res/drawable/ic_skip_prev.xml" />
+                <resource-file src="src/android/res/drawable/ic_skip_next.xml" target="app/src/main/res/drawable/ic_skip_next.xml" />
+                <config-file target="app/src/main/AndroidManifest.xml" parent="/manifest/application">
+                    <attribute name="android:networkSecurityConfig" value="@xml/network_security_config" />
+                </config-file>
+                <resource-file src="src/android/res/xml/network_security_config.xml" target="app/src/main/res/xml/network_security_config.xml" />
+            </platform>
+        </plugin>
+        XMLEOF
 
-on:
-  push:
-    branches: [ main, master ]
-  pull_request:
-    branches: [ main, master ]
-  workflow_dispatch:
+        cat > $P/www/YinguMusic.js << 'JSEOF'
+        import android.util.Log;
 
-jobs:
-  build:
-    runs-on: ubuntu-latest
+        public class YinguMusicPlugin extends CordovaPlugin {
+            private static final String TAG = "YinguMusicPlugin";
+            private static CallbackContext controlCallback = null;
 
-    steps:
-    - name: 拉取代码
-      uses: actions/checkout@v4
+            private final BroadcastReceiver serviceControlReceiver = new BroadcastReceiver() {
+                @Override
+                public void onReceive(Context context, Intent intent) {
+                    if (intent.hasExtra("control")) {
+                        String control = intent.getStringExtra("control");
+                        sendControlToJs(control);
+                    }
+                }
+            };
 
-    - name: 安装 Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: '18'
+            @Override
+            public void initialize(CordovaInterface cordova, CordovaWebView webView) {
+                super.initialize(cordova, webView);
+                IntentFilter filter = new IntentFilter("com.yingu.player.CONTROL");
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    cordova.getActivity().registerReceiver(serviceControlReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
+                } else {
+                    cordova.getActivity().registerReceiver(serviceControlReceiver, filter);
+                }
+            }
 
-    - name: 安装 Java
-      uses: actions/setup-java@v4
-      with:
-        distribution: 'temurin'
-        java-version: '17'
+            @Override
+            public boolean 
+name), content); }
+          const xmlDir = path.join(resDir, 'xml');
+          ensureDir(xmlDir);
+          const nscPath = path.join(xmlDir, 'network_security_config.xml');
+          if (!fs.existsSync(nscPath)) { fs.writeFileSync(nscPath, '<?xml version="1.0" encoding="utf-8"?>\n<network-security-config>\n    <base-config cleartextTrafficPermitted="true">\n        <trust-anchors>\n            <certificates src="system" />\n        </trust-anchors>\n    </base-config>\n</network-security-config>'); }
+        }
+        module.exports = function(context) {
+            protected void onResume() {
+                super.onResume();
+                if (this.appView != null) { this.appView.handleResume(this.keepRunning); }
+            }
+        }`;
+        module.exports = function(context) {
+            const projectRoot = context.opts.projectRoot || process.cwd();
+            const platformPath = path.join(projectRoot, 'platforms', 'android');
+            const manifestPath = path.join(platformPath, 'app', 'src', 'main', 'AndroidManifest.xml');
+            let packageName = 'com.yingu.player';
+            try {
+                if (fs.existsSync(manifestPath)) {
+                    const manifest = fs.readFileSync(manifestPath, 'utf8');
+                    const match = manifest.match(/package="([^"]+)"/);
+                    if (match) packageName = match[1];
+                }
+            } catch (e) {}
+            const packagePath = packageName.replace(/\./g, '/');
+            let mainActivityPath = path.join(platformPath, 'app', 'src', 'main', 'java', packagePath, 'MainActivity.java');
+            if (!fs.existsSync(mainActivityPath)) {
+                const javaDir = path.join(platformPath, 'app', 'src', 'main', 'java');
+                if (fs.existsSync(javaDir)) {
+                    try {
+                        const found = require('child_process').execSync('find "' + javaDir + '" -name "MainActivity.java" 2>/dev/null', { encoding: 'utf8' }).trim().split('\n')[0].trim();
+                        if (found && fs.existsSync(found)) mainActivityPath = found;
+                    } catch (e2) {}
+                }
+            }
+            if (fs.existsSync(mainActivityPath)) {
+                const content = CUSTOM_MAIN_ACTIVITY.replace(/PACKAGE_NAME/g, packageName);
+                fs.writeFileSync(mainActivityPath, content, 'utf8');
+            }
+        };
+        JSEOF
 
-    - name: 安装 Cordova
-      run: npm install -g cordova@11.1.0
+        echo "=== 插件文件创建完成 ==="
+        ls $P/plugin.xml $P/package.json $P/www/YinguMusic.js $P/src/android/MusicService.java
 
-    - name: 安装项目依赖
-      run: npm install
-
-    - name: 创建插件文件
-      run: node scripts/create-plugin.js
-
-    - name: 安装本地音乐服务插件
-      run: cordova plugin add ./plugins/yingu-music-service --save
+        cordova plugin add ./plugins/yingu-music-service --save
 
     - name: 添加 Android 平台
       run: cordova platform add android --save
