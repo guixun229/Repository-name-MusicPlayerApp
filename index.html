@@ -1638,90 +1638,108 @@ function dbDelete(key) {
   });
 }
 
-// 防抖保存
+// 防抖保存（用于文件/localStorage，较慢）
 let _saveTimer = null;
+// 立即保存标记
+let _deviceReady = false;
+
 function saveAllData() {
+  // 立即保存到 SharedPreferences（同步，最快最可靠）
+  _saveToNative();
+  // 防抖保存到文件/localStorage（较慢，作为备份）
   if (_saveTimer) clearTimeout(_saveTimer);
   _saveTimer = setTimeout(_doSave, 500);
 }
 
+// 立即保存到 Android SharedPreferences（同步调用，不等回调）
+function _saveToNative() {
+  try {
+    if (!_deviceReady || !window.YinguMusic || !window.YinguMusic.saveData) return;
+    const data = _serializeData();
+    const jsonStr = JSON.stringify(data);
+    YinguMusic.saveData(jsonStr);
+  } catch(e) {
+    console.warn('[持久化] Native即时保存失败:', e);
+  }
+}
+
+// 序列化数据（提取公共逻辑）
+function _serializeData() {
+  const tracksData = tracks.map(t => {
+    const copy = { ...t };
+    if (copy.src && copy.src.startsWith('blob:')) {
+      if (copy._fileKey) {
+        copy.src = 'idb:' + copy._fileKey;
+      }
+      delete copy._fileKey;
+    }
+    return copy;
+  });
+
+  const settingsData = {
+    bgColor: settings.bgColor,
+    bgOpacity: settings.bgOpacity,
+    recordColor: settings.recordColor,
+    recordOpacity: settings.recordOpacity,
+    labelColor: settings.labelColor,
+    labelOpacity: settings.labelOpacity,
+    bgImageIndex: settings.bgImageIndex,
+    recordImageIndex: settings.recordImageIndex,
+    labelImageIndex: settings.labelImageIndex,
+    bgOpacityImage: settings.bgOpacityImage,
+    recordOpacityImage: settings.recordOpacityImage,
+    labelOpacityImage: settings.labelOpacityImage,
+    bgImages: settings.bgImages.map((item, i) => {
+      const url = typeof item === 'string' ? item : (item && item.url);
+      if (url && url.startsWith('blob:')) {
+        const key = typeof item === 'object' && item._fileKey ? item._fileKey : 'img-bg-' + i;
+        return 'idb:' + key;
+      }
+      return url || '';
+    }),
+    recordImages: settings.recordImages.map((item, i) => {
+      const url = typeof item === 'string' ? item : (item && item.url);
+      if (url && url.startsWith('blob:')) {
+        const key = typeof item === 'object' && item._fileKey ? item._fileKey : 'img-rec-' + i;
+        return 'idb:' + key;
+      }
+      return url || '';
+    }),
+    labelImages: settings.labelImages.map((item, i) => {
+      const url = typeof item === 'string' ? item : (item && item.url);
+      if (url && url.startsWith('blob:')) {
+        const key = typeof item === 'object' && item._fileKey ? item._fileKey : 'img-lbl-' + i;
+        return 'idb:' + key;
+      }
+      return url || '';
+    })
+  };
+
+  return {
+    tracks: tracksData,
+    categories: categories,
+    nextTrackId: nextTrackId,
+    nextCategoryId: nextCategoryId,
+    currentCategoryId: currentCategoryId,
+    currentIndex: currentIndex,
+    playMode: playMode,
+    settings: settingsData,
+    version: 2
+  };
+}
+
 function _doSave() {
   try {
-    // 序列化 tracks，把 blob: URL 替换为 fileKey 引用
-    const tracksData = tracks.map(t => {
-      const copy = { ...t };
-      if (copy.src && copy.src.startsWith('blob:')) {
-        // blob URL 对应的 fileKey 已在添加时存入 IndexedDB
-        // 用 fileKey 标记替代 blob URL
-        if (copy._fileKey) {
-          copy.src = 'idb:' + copy._fileKey;
-        }
-        delete copy._fileKey;
-      }
-      return copy;
-    });
-
-    // 序列化 settings 中的 blob URL 图片
-    const settingsData = {
-      bgColor: settings.bgColor,
-      bgOpacity: settings.bgOpacity,
-      recordColor: settings.recordColor,
-      recordOpacity: settings.recordOpacity,
-      labelColor: settings.labelColor,
-      labelOpacity: settings.labelOpacity,
-      bgImageIndex: settings.bgImageIndex,
-      recordImageIndex: settings.recordImageIndex,
-      labelImageIndex: settings.labelImageIndex,
-      bgOpacityImage: settings.bgOpacityImage,
-      recordOpacityImage: settings.recordOpacityImage,
-      labelOpacityImage: settings.labelOpacityImage,
-      bgImages: settings.bgImages.map((item, i) => {
-        const url = typeof item === 'string' ? item : (item && item.url);
-        if (url && url.startsWith('blob:')) {
-          const key = typeof item === 'object' && item._fileKey ? item._fileKey : 'img-bg-' + i;
-          return 'idb:' + key;
-        }
-        return url || '';
-      }),
-      recordImages: settings.recordImages.map((item, i) => {
-        const url = typeof item === 'string' ? item : (item && item.url);
-        if (url && url.startsWith('blob:')) {
-          const key = typeof item === 'object' && item._fileKey ? item._fileKey : 'img-rec-' + i;
-          return 'idb:' + key;
-        }
-        return url || '';
-      }),
-      labelImages: settings.labelImages.map((item, i) => {
-        const url = typeof item === 'string' ? item : (item && item.url);
-        if (url && url.startsWith('blob:')) {
-          const key = typeof item === 'object' && item._fileKey ? item._fileKey : 'img-lbl-' + i;
-          return 'idb:' + key;
-        }
-        return url || '';
-      })
-    };
-
-    const data = {
-      tracks: tracksData,
-      categories: categories,
-      nextTrackId: nextTrackId,
-      nextCategoryId: nextCategoryId,
-      currentCategoryId: currentCategoryId,
-      currentIndex: currentIndex,
-      playMode: playMode,
-      settings: settingsData,
-      version: 2
-    };
-
+    const data = _serializeData();
     const jsonStr = JSON.stringify(data);
     localStorage.setItem(LS_KEY, jsonStr);
     // 写入文件（异步备份）
     saveToFile(jsonStr);
     // 写入 Android SharedPreferences（同步，最可靠）
-    if (window.YinguMusic && window.YinguMusic.saveData) {
+    if (_deviceReady && window.YinguMusic && window.YinguMusic.saveData) {
       try { YinguMusic.saveData(jsonStr); } catch(e) { console.warn('[持久化] Native保存失败:', e); }
     }
-    console.log('[持久化] 数据已保存:', tracksData.length, '首曲目');
+    console.log('[持久化] 数据已保存:', data.tracks.length, '首曲目');
   } catch (e) {
     console.error('[持久化] 保存失败:', e);
   }
@@ -2334,7 +2352,8 @@ function releaseWakeLock() {
 // 页面可见性变化 - 恢复 Wake Lock 和静音保活
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden') {
-    // 页面隐藏时立即保存数据
+    // 页面隐藏时立即保存数据（先 Native 同步，再文件）
+    _saveToNative();
     _doSave();
   } else if (document.visibilityState === 'visible' && isPlaying) {
     requestWakeLock();
@@ -2348,6 +2367,7 @@ document.addEventListener('visibilitychange', () => {
 
 // beforeunload - 最后机会保存数据
 window.addEventListener('beforeunload', () => {
+  _saveToNative();
   _doSave();
 });
 
@@ -2355,7 +2375,8 @@ window.addEventListener('beforeunload', () => {
 // 在 Cordova WebView 中，这个事件比 visibilitychange 更可靠
 if (window.cordova) {
   document.addEventListener('pause', () => {
-    // 息屏/切后台时：立即保存数据（不用防抖，防止被杀掉时丢数据）
+    // 息屏/切后台时：立即保存数据（先 Native 同步保存，防被杀丢数据）
+    _saveToNative();
     _doSave();
     // 通知 Native 服务
     if (isPlaying && window.YinguMusic) {
@@ -2401,7 +2422,8 @@ document.addEventListener('resume', () => {
 
 // pagehide - 确保后台播放状态正确，并保存数据
 window.addEventListener('pagehide', (event) => {
-  _doSave(); // 立即保存，防止数据丢失
+  _saveToNative(); // Native 同步保存
+  _doSave(); // 文件/localStorage 保存
   if (isPlaying) {
     // 确保浏览器知道我们正在播放，应该在后台继续
     if ('mediaSession' in navigator) {
@@ -3888,38 +3910,91 @@ renderCategoryBar();
 updateTrackList();
 
 // ==================== App Init ====================
-// 等 Cordova deviceready 后再加载数据（确保 File API 可用）
-(async function initApp() {
-  try {
-    // 如果在 Cordova 环境中，等待 deviceready
-    if (window.cordova) {
-      await new Promise((resolve) => {
-        document.addEventListener('deviceready', resolve, false);
-        // 超时兜底：2秒后无论如何都继续
-        setTimeout(resolve, 2000);
-      });
+// Cordova 设备就绪后加载数据
+function _onDeviceReady() {
+  _deviceReady = true;
+  console.log('[持久化] deviceready 已触发');
+  // 设置 Cordova 桥接
+  setupCordovaBridge();
+  // 加载数据
+  (async function() {
+    try {
+      await openDB();
+      const hasData = await loadAllData();
+      if (hasData) {
+        console.log('[持久化] 已恢复历史数据');
+      }
+    } catch (e) {
+      console.warn('[持久化] 初始化失败:', e);
     }
-    await openDB();
-    const hasData = await loadAllData();
-    if (hasData) {
-      console.log('[持久化] 已恢复历史数据');
+    applySettings();
+    renderCategoryBar();
+    renderSettingsColors();
+    if (tracks.length > 0 && currentIndex < tracks.length) {
+      loadTrack(currentIndex);
+    } else if (tracks.length > 0) {
+      currentIndex = 0;
+      loadTrack(0);
     }
-  } catch (e) {
-    console.warn('[持久化] 初始化失败:', e);
+    updateTrackList();
+  })();
+}
+
+if (window.cordova) {
+  // 检查 deviceready 是否已经触发
+  if (typeof cordova !== 'undefined' && cordova.fired) {
+    _onDeviceReady();
+  } else {
+    document.addEventListener('deviceready', _onDeviceReady, false);
+    // 超时兜底：3秒后无论如何都继续
+    setTimeout(function() {
+      if (!_deviceReady) {
+        console.warn('[持久化] deviceready 超时，强制加载');
+        _deviceReady = true;
+        (async function() {
+          try {
+            await openDB();
+              const hasData = await loadAllData();
+            if (hasData) console.log('[持久化] 超时后恢复数据');
+          } catch(e) {
+            console.warn('[持久化] 超时加载失败:', e);
+          }
+          applySettings();
+          renderCategoryBar();
+          renderSettingsColors();
+          if (tracks.length > 0 && currentIndex < tracks.length) {
+            loadTrack(currentIndex);
+          } else if (tracks.length > 0) {
+            currentIndex = 0;
+            loadTrack(0);
+          }
+          updateTrackList();
+        })();
+      }
+    }, 3000);
   }
-  // 应用设置（恢复保存的颜色、图片等）
-  applySettings();
-  renderCategoryBar();
-  renderSettingsColors();
-  // 加载当前曲目到播放器（不自动播放）
-  if (tracks.length > 0 && currentIndex < tracks.length) {
-    loadTrack(currentIndex);
-  } else if (tracks.length > 0) {
-    currentIndex = 0;
-    loadTrack(0);
-  }
-  updateTrackList();
-})();
+} else {
+  // 非 Cordova 环境（浏览器）
+  (async function initApp() {
+    try {
+      await openDB();
+      const hasData = await loadAllData();
+      if (hasData) console.log('[持久化] 已恢复历史数据');
+    } catch (e) {
+      console.warn('[持久化] 初始化失败:', e);
+    }
+    applySettings();
+    renderCategoryBar();
+    renderSettingsColors();
+    if (tracks.length > 0 && currentIndex < tracks.length) {
+      loadTrack(currentIndex);
+    } else if (tracks.length > 0) {
+      currentIndex = 0;
+      loadTrack(0);
+    }
+    updateTrackList();
+  })();
+}
 
 // ==================== Cordova Integration ====================
 function setupCordovaBridge() {
@@ -3971,12 +4046,9 @@ function setupCordovaBridge() {
   setTimeout(notifyNative, 500);
 }
 
-if (window.cordova) {
-  document.addEventListener('deviceready', function() {
-    setupCordovaBridge();
-  }, false);
-} else if ('serviceWorker' in navigator) {
-  // Web/PWA 模式 - 注册 Service Worker
+// Cordova Integration 由 _onDeviceReady() 调用 setupCordovaBridge()
+// 浏览器环境注册 Service Worker
+if (!window.cordova && 'serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('sw.js').then(reg => {
       console.log('音轨 Service Worker registered');
