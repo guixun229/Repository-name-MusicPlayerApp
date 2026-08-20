@@ -28,13 +28,12 @@ jobs:
 
     - name: 安装 Cordova
       run: npm install -g cordova@11.1.0
-    
+
     - name: 安装兼容版 Gradle
       run: |
         wget -q https://services.gradle.org/distributions/gradle-8.7-bin.zip
         unzip -q gradle-8.7-bin.zip -d /opt/
         echo "/opt/gradle-8.7/bin" >> $GITHUB_PATH
-
 
     - name: 安装项目依赖
       run: npm install
@@ -626,7 +625,7 @@ jobs:
         cordova plugin add ./plugins/yingu-music-service --save
 
     - name: 添加 Android 平台
-      run: cordova platform add android --save
+      run: cordova platform add android@12.0.1 --save
 
     - name: 安装其他插件
       run: |
