@@ -32,11 +32,17 @@ jobs:
     - name: 安装项目依赖
       run: npm install
 
+    - name: 确保插件 package.json 存在
+      run: |
+        if [ ! -f plugins/yingu-music-service/package.json ]; then
+          echo '{"name":"yingu-music-service","version":"1.0.2","description":"音轨音乐服务插件","cordova":{"id":"yingu-music-service","platforms":["android"]},"author":"音轨","license":"Apache-2.0"}' > plugins/yingu-music-service/package.json
+        fi
+
     - name: 添加 Android 平台
       run: cordova platform add android --save
 
     - name: 安装本地音乐服务插件
-      run: cordova plugin add yingu-music-service --searchpath ./plugins/ --save
+      run: cordova plugin add ./plugins/yingu-music-service --save
 
     - name: 安装其他插件
       run: |
