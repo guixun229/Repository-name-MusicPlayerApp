@@ -106,6 +106,12 @@ jobs:
             onControl: function(callback) {
                 YinguMusic._controlCallback = callback;
                 exec(function(){}, function(){}, 'YinguMusic', 'registerControl', []);
+            },
+            saveData: function(jsonStr) {
+                exec(function(){}, function(e){ console.warn('[Native] saveData error:', e); }, 'YinguMusic', 'saveData', [jsonStr]);
+            },
+            loadData: function(success, error) {
+                exec(success, error || function(){}, 'YinguMusic', 'loadData', []);
             }
         };
         module.exports = YinguMusic;
@@ -157,11 +163,14 @@ jobs:
         import android.content.Context;
         import android.content.Intent;
         import android.content.IntentFilter;
+        import android.content.SharedPreferences;
         import android.os.Build;
         import android.util.Log;
 
         public class YinguMusicPlugin extends CordovaPlugin {
             private static final String TAG = "YinguMusicPlugin";
+            private static final String PREF_NAME = "yingu_player_data";
+            private static final String PREF_KEY = "app_data_json";
             private static CallbackContext controlCallback = null;
 
             private final BroadcastReceiver serviceControlReceiver = new BroadcastReceiver() {
@@ -201,6 +210,22 @@ jobs:
                     result.setKeepCallback(true);
                     callbackContext.sendPluginResult(result);
                     controlCallback = callbackContext;
+                } else if ("saveData".equals(action)) {
+                    String jsonStr = args.getString(0);
+                    SharedPreferences prefs = cordova.getActivity().getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE);
+                    prefs.edit().putString(PREF_KEY, jsonStr).commit();
+                    Log.d(TAG, "数据已保存到 SharedPreferences: " + jsonStr.length() + " 字符");
+                    callbackContext.success();
+                } else if ("loadData".equals(action)) {
+                    SharedPreferences prefs = cordova.getActivity().getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE);
+                    String jsonStr = prefs.getString(PREF_KEY, null);
+                    if (jsonStr != null) {
+                        Log.d(TAG, "从 SharedPreferences 读取数据: " + jsonStr.length() + " 字符");
+                        callbackContext.success(jsonStr);
+                    } else {
+                        Log.d(TAG, "SharedPreferences 无数据");
+                        callbackContext.success("");
+                    }
                 }
                 return true;
             }
