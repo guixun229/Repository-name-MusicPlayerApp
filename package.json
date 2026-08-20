@@ -1,16 +1,12 @@
 {
-  "name": "music-player-app",
+  "name": "yingu-music-service",
   "version": "1.2.1",
-  "private": true,
-  "dependencies": {
-    "@capacitor/core": "^5.7.0",
-    "@capacitor/android": "^5.7.0"
+  "description": "音轨 - 后台音乐播放服务、通知栏控制、MediaSession",
+  "cordova": {
+    "id": "yingu-music-service",
+    "platforms": ["android"]
   },
-  "devDependencies": {
-    "@capacitor/cli": "^5.7.0",
-    "@capacitor/assets": "^3.0.0"
-  },
-  "scripts": {
-    "build": "echo 'No build needed'"
-  }
+  "keywords": ["cordova", "music", "service", "background", "android"],
+  "author": "音轨",
+  "license": "Apache 2.0"
 }
