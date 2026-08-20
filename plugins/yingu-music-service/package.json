@@ -1,0 +1,12 @@
+{
+  "name": "yingu-music-service",
+  "version": "1.2.1",
+  "description": "音轨 - 后台音乐播放服务、通知栏控制、MediaSession",
+  "cordova": {
+    "id": "yingu-music-service",
+    "platforms": ["android"]
+  },
+  "keywords": ["cordova", "music", "service", "background", "android"],
+  "author": "音轨",
+  "license": "Apache 2.0"
+}
