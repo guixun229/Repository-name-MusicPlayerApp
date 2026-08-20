@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<plugin xmlns="http://apache.org/cordova/ns/plugins/1.0"
+        id="yingu-music-service"
+        version="1.0.2">
+
+    <name>音轨 Music Service</name>
+    <description>音轨 - 后台音乐播放服务、通知栏控制、MediaSession</description>
+    <license>Apache 2.0</license>
+
+    <!-- JavaScript 接口 -->
+    <js-module name="YinguMusic" src="www/YinguMusic.js">
+        <clobbers target="window.YinguMusic" />
+    </js-module>
+
+    <!-- Hook：生成图标 + 修改 MainActivity -->
+    <hook type="before_prepare" src="scripts/generate-icons.js" />
+    <hook type="before_build" src="scripts/modify_mainactivity.js" />
+    <hook type="after_platform_add" src="scripts/modify_mainactivity.js" />
+
+    <!-- Android 平台 -->
+    <platform name="android">
+        <!-- 权限 -->
+        <config-file target="app/src/main/AndroidManifest.xml" parent="/manifest">
+            <uses-permission android:name="android.permission.WAKE_LOCK" />
+            <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+            <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+            <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+        </config-file>
+
+        <!-- 前台服务声明 -->
+        <config-file target="app/src/main/AndroidManifest.xml" parent="/manifest/application">
+            <service
+                android:name="com.yingu.player.MusicService"
+                android:exported="false"
+                android:foregroundServiceType="mediaPlayback">
+                <intent-filter>
+                    <action android:name="android.intent.action.MEDIA_BUTTON" />
+                </intent-filter>
+            </service>
+        </config-file>
+
+        <!-- Java 源文件 -->
+        <source-file src="src/android/MusicService.java" target-dir="app/src/main/java/com/yingu/player" />
+        <source-file src="src/android/YinguMusicPlugin.java" target-dir="app/src/main/java/com/yingu/player" />
+
+        <!-- 通知栏图标（XML 矢量图，文本文件，不依赖 PNG） -->
+        <resource-file src="src/android/res/drawable/ic_music_note.xml" target="app/src/main/res/drawable/ic_music_note.xml" />
+        <resource-file src="src/android/res/drawable/ic_play.xml" target="app/src/main/res/drawable/ic_play.xml" />
+        <resource-file src="src/android/res/drawable/ic_pause.xml" target="app/src/main/res/drawable/ic_pause.xml" />
+        <resource-file src="src/android/res/drawable/ic_skip_prev.xml" target="app/src/main/res/drawable/ic_skip_prev.xml" />
+        <resource-file src="src/android/res/drawable/ic_skip_next.xml" target="app/src/main/res/drawable/ic_skip_next.xml" />
+
+        <!-- 网络安全配置 -->
+        <config-file target="app/src/main/AndroidManifest.xml" parent="/manifest/application">
+            <attribute name="android:networkSecurityConfig" value="@xml/network_security_config" />
+        </config-file>
+        <resource-file src="src/android/res/xml/network_security_config.xml" target="app/src/main/res/xml/network_security_config.xml" />
+    </platform>
+
+</plugin>

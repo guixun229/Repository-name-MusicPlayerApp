@@ -26,17 +26,11 @@ jobs:
         distribution: 'temurin'
         java-version: '17'
 
-    - name: 安装 Python PIL（用于生成图标）
-      run: pip install Pillow --break-system-packages || pip install Pillow
-
     - name: 安装 Cordova
       run: npm install -g cordova@11.1.0
 
     - name: 安装项目依赖
       run: npm install
-
-    - name: 生成应用图标
-      run: node scripts/generate-icons.js
 
     - name: 添加 Android 平台
       run: cordova platform add android --save
