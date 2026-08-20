@@ -36,7 +36,7 @@ jobs:
       run: cordova platform add android --save
 
     - name: 安装本地音乐服务插件
-      run: cordova plugin add ./plugins/yingu-music-service --save
+      run: cordova plugin add yingu-music-service --searchpath ./plugins/ --save
 
     - name: 安装其他插件
       run: |
