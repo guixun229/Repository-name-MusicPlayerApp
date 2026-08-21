@@ -541,8 +541,15 @@ input[type="file"] { display: none; }
 
 <!-- Media -->
 <audio id="audioPlayer" preload="auto" playsinline webkit-playsinline crossorigin="anonymous"></audio>
-<video id="videoPlayer" preload="auto" playsinline webkit-playsinline crossorigin="anonymous"></vid
+<video id="videoPlayer" preload="auto" playsinline webkit-playsinline crossorigin="anonymous"></video>
 
+<!-- File Inputs -->
+<input type="file" id="audioInput" accept="audio/*" multiple>
+<input type="file" id="videoInput" accept="video/*" multiple>
+<input type="file" id="bgImageInput" accept="image/*" multiple>
+<input type="file" id="recordImageInput" accept="image/*" multiple>
+<input type="file" id="labelImageInput" accept="image/*" multiple>
+<input type="file" id="importInput" accept="application/json,.json">
 <script>
 'use strict';
 
@@ -1493,4 +1500,1739 @@ function updateMediaSession() {
       const recUrl = typeof recItem === 'string' ? recItem : (recItem && recItem.url ? recItem.url : '');
       if (recUrl) artwork.unshift({ src: recUrl, sizes: '512x512', type: 'image/jpeg' });
     }
-    navigator.mediaSession.m
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title: track.name,
+      artist: '音轨',
+      album: categories.find(c => c.id === track.categoryId)?.name || '音轨',
+      artwork: artwork.length > 0 ? artwork : [{ src: '', sizes: '512x512' }]
+    });
+    navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';
+    if ('setPositionState' in navigator.mediaSession && currentMedia && currentMedia.duration) {
+      try {
+        navigator.mediaSession.setPositionState({
+          duration: currentMedia.duration || 0,
+          position: currentMedia.currentTime || 0,
+          playbackRate: 1
+        });
+      } catch (e) {}
+    }
+  } catch (e) {}
+}
+
+// ==================== Rotation Animation ====================
+function animateRotation() {
+  rotationSpeed += (targetSpeed - rotationSpeed) * ACCEL_FACTOR;
+  rotationAngle += rotationSpeed;
+  if (rotationAngle >= 360) rotationAngle -= 360;
+  if (rotationAngle < 0) rotationAngle += 360;
+  record.style.transform = `rotate(${rotationAngle}deg)`;
+  if (isPlaying || Math.abs(rotationSpeed) > 0.05) {
+    requestAnimationFrame(animateRotation);
+  } else {
+    animating = false;
+    rotationSpeed = 0;
+  }
+}
+
+function startAnimation() {
+  if (!animating) {
+    animating = true;
+    requestAnimationFrame(animateRotation);
+  }
+}
+
+// ==================== Playback ====================
+function loadTrack(index) {
+  if (tracks.length === 0) {
+    labelText.textContent = '音轨';
+    return;
+  }
+  currentIndex = ((index % tracks.length) + tracks.length) % tracks.length;
+  const track = tracks[currentIndex];
+  const prevMedia = currentMedia;
+  if (track.type === 'video') currentMedia = videoPlayer;
+  else currentMedia = audioPlayer;
+  if (prevMedia !== currentMedia) {
+    prevMedia.pause();
+    prevMedia.currentTime = 0;
+  }
+
+  if (!track.src && track._fileKey) {
+    (async () => {
+      try {
+        const blob = _db ? await dbGet(track._fileKey) : null;
+        if (blob) {
+          track.src = URL.createObjectURL(blob);
+          currentMedia.src = track.src;
+          currentMedia.load();
+          labelText.textContent = track.name;
+          updateTrackList();
+          updateMediaSession();
+          updateProgress();
+          saveAllData();
+          showToast('已恢复音频文件');
+        } else {
+          showToast('音频文件已丢失');
+        }
+      } catch (e) {
+        showToast('加载音频失败');
+      }
+    })();
+    return;
+  }
+
+  currentMedia.src = track.src || '';
+  if (currentMedia.src) {
+    currentMedia.load();
+  } else {
+    showToast('音频文件不可用');
+  }
+  labelText.textContent = track.name;
+  updateTrackList();
+  updateMediaSession();
+  updateProgress();
+  saveAllData();
+}
+
+function play() {
+  if (tracks.length === 0) { showToast('请先添加曲目'); return; }
+  const track = tracks[currentIndex];
+  if (!track.src && track._fileKey) {
+    loadTrack(currentIndex);
+    return;
+  }
+  isPlaying = true;
+  targetSpeed = PLAY_SPEED;
+  startAnimation();
+  updateMediaSession();
+  requestWakeLock();
+  startSilentKeepAlive();
+  startKeepAliveTimer();
+  if ('mediaSession' in navigator) {
+    navigator.mediaSession.playbackState = 'playing';
+  }
+  const playPromise = currentMedia.play();
+  if (playPromise && playPromise.catch) {
+    playPromise.catch(() => { showToast('播放失败'); pause(); });
+  }
+  updateTrackList();
+}
+
+function pause() {
+  isPlaying = false;
+  targetSpeed = 0;
+  startAnimation();
+  releaseWakeLock();
+  stopKeepAliveTimer();
+  currentMedia.pause();
+  if ('mediaSession' in navigator) {
+    navigator.mediaSession.playbackState = 'paused';
+  }
+  updateTrackList();
+  updateMediaSession();
+}
+
+function togglePlay() {
+  if (isPlaying) pause(); else play();
+}
+
+function nextTrack() {
+  if (tracks.length === 0) return;
+  if (playMode === 'shuffle') {
+    let next;
+    do { next = Math.floor(Math.random() * tracks.length); }
+    while (next === currentIndex && tracks.length > 1);
+    loadTrack(next);
+  } else {
+    loadTrack(currentIndex + 1);
+  }
+  if (isPlaying) play();
+}
+
+function prevTrack() {
+  if (tracks.length === 0) return;
+  if (currentMedia.currentTime > 3) {
+    currentMedia.currentTime = 0;
+  } else {
+    loadTrack(currentIndex - 1);
+  }
+  if (isPlaying) play();
+}
+
+function onMediaEnded() {
+  if (playMode === 'shuffle') { nextTrack(); }
+  else {
+    if (currentIndex < tracks.length - 1) { loadTrack(currentIndex + 1); play(); }
+    else { pause(); loadTrack(0); }
+  }
+}
+
+function onMediaError() { showToast('无法播放此曲目'); loadingRing.classList.remove('show'); pause(); }
+function onMediaWaiting() { loadingRing.classList.add('show'); }
+function onMediaPlaying() { loadingRing.classList.remove('show'); }
+
+[audioPlayer, videoPlayer].forEach(el => {
+  el.addEventListener('ended', onMediaEnded);
+  el.addEventListener('error', onMediaError);
+  el.addEventListener('waiting', onMediaWaiting);
+  el.addEventListener('playing', onMediaPlaying);
+  el.addEventListener('canplay', () => loadingRing.classList.remove('show'));
+  el.addEventListener('timeupdate', updateProgress);
+  el.addEventListener('loadedmetadata', updateProgress);
+});
+
+// ==================== Play Mode ====================
+function togglePlayMode() {
+  if (playMode === 'sequence') {
+    playMode = 'shuffle';
+    modeText.textContent = '随机播放';
+    modeDot1.classList.add('active');
+    modeDot2.classList.add('active');
+    showToast('随机播放');
+  } else {
+    playMode = 'sequence';
+    modeText.textContent = '顺序播放';
+    modeDot1.classList.remove('active');
+    modeDot2.classList.remove('active');
+    showToast('顺序播放');
+  }
+  updateTrackList();
+  saveAllData();
+}
+
+// ==================== Record Gestures (Tap + Swipe) ====================
+let clickTimer = null;
+let touchHandled = false;
+let touchStartX = 0, touchStartY = 0, touchStartTime = 0;
+let recordGesture = 'pending';
+
+record.addEventListener('click', () => {
+  if (touchHandled) return;
+  handleTap();
+});
+
+recordWrap.addEventListener('touchstart', e => {
+  if (e.touches.length > 1) return;
+  const t = e.touches[0];
+  touchStartX = t.clientX;
+  touchStartY = t.clientY;
+  touchStartTime = Date.now();
+  recordGesture = 'pending';
+}, { passive: true });
+
+recordWrap.addEventListener('touchmove', e => {
+  if (recordGesture === 'swipe') return;
+  const t = e.touches[0];
+  const dx = t.clientX - touchStartX;
+  const dy = t.clientY - touchStartY;
+  const absDx = Math.abs(dx), absDy = Math.abs(dy);
+  if (recordGesture === 'pending') {
+    if (absDx > 50 && absDx > absDy * 1.5) {
+      recordGesture = 'swipe';
+    }
+  }
+}, { passive: true });
+
+recordWrap.addEventListener('touchend', e => {
+  touchHandled = true;
+  setTimeout(() => { touchHandled = false; }, 350);
+  const t = e.changedTouches[0];
+  const dx = t.clientX - touchStartX;
+  const dy = t.clientY - touchStartY;
+  const dt = Date.now() - touchStartTime;
+  const absDx = Math.abs(dx), absDy = Math.abs(dy);
+  if (recordGesture === 'swipe') {
+    if (dx > 0) { prevTrack(); showToast('上一曲'); }
+    else { nextTrack(); showToast('下一曲'); }
+    recordGesture = 'pending';
+    return;
+  }
+  if (absDx < 12 && absDy < 12 && dt < 300) {
+    handleTap();
+  }
+  recordGesture = 'pending';
+}, { passive: true });
+
+let mouseDownX = 0, mouseDownY = 0, mouseDown = false;
+let mouseGesture = 'pending';
+
+recordWrap.addEventListener('mousedown', e => {
+  if (touchHandled) return;
+  mouseDown = true;
+  mouseDownX = e.clientX;
+  mouseDownY = e.clientY;
+  mouseGesture = 'pending';
+});
+
+window.addEventListener('mousemove', e => {
+  if (!mouseDown) return;
+  if (mouseGesture === 'swipe') return;
+  const dx = e.clientX - mouseDownX;
+  const dy = e.clientY - mouseDownY;
+  const absDx = Math.abs(dx), absDy = Math.abs(dy);
+  if (mouseGesture === 'pending') {
+    if (absDx > 60 && absDx > absDy * 1.5) {
+      mouseGesture = 'swipe';
+    }
+  }
+});
+
+window.addEventListener('mouseup', e => {
+  if (!mouseDown) return;
+  mouseDown = false;
+  if (mouseGesture === 'swipe') {
+    const dx = e.clientX - mouseDownX;
+    if (dx > 0) { prevTrack(); showToast('上一曲'); }
+    else { nextTrack(); showToast('下一曲'); }
+    mouseGesture = 'pending';
+    return;
+  }
+  mouseGesture = 'pending';
+});
+
+function handleTap() {
+  if (clickTimer) {
+    clearTimeout(clickTimer);
+    clickTimer = null;
+    togglePlayMode();
+  } else {
+    clickTimer = setTimeout(() => {
+      if (tracks.length === 0) { showToast('请先添加曲目'); openList(); }
+      else { togglePlay(); }
+      clickTimer = null;
+    }, 220);
+  }
+}
+
+// ==================== Progress Bar Seek ====================
+let isSeeking = false;
+
+function seekToPosition(clientX) {
+  const rect = progressBar.getBoundingClientRect();
+  let percent = (clientX - rect.left) / rect.width;
+  percent = Math.max(0, Math.min(1, percent));
+  const duration = currentMedia.duration;
+  if (!duration || isNaN(duration)) return;
+  const newTime = percent * duration;
+  currentMedia.currentTime = newTime;
+  progressFill.style.width = (percent * 100) + '%';
+  seekCurrent.textContent = formatTime(newTime);
+  seekDuration.textContent = formatTime(duration);
+}
+
+function showSeekBar() {
+  const duration = currentMedia.duration;
+  seekCurrent.textContent = formatTime(currentMedia.currentTime);
+  seekDuration.textContent = formatTime(duration);
+  seekDisplay.classList.add('show');
+  progressBar.classList.add('dragging');
+}
+
+function hideSeekBar() {
+  seekDisplay.classList.remove('show');
+  progressBar.classList.remove('dragging');
+}
+
+progressBar.addEventListener('touchstart', e => {
+  e.preventDefault();
+  isSeeking = true;
+  showSeekBar();
+  const t = e.touches[0];
+  seekToPosition(t.clientX);
+}, { passive: false });
+
+progressBar.addEventListener('touchmove', e => {
+  if (!isSeeking) return;
+  e.preventDefault();
+  const t = e.touches[0];
+  seekToPosition(t.clientX);
+}, { passive: false });
+
+progressBar.addEventListener('touchend', e => {
+  if (!isSeeking) return;
+  isSeeking = false;
+  hideSeekBar();
+  updateProgress();
+}, { passive: true });
+
+progressBar.addEventListener('mousedown', e => {
+  isSeeking = true;
+  showSeekBar();
+  seekToPosition(e.clientX);
+});
+
+window.addEventListener('mousemove', e => {
+  if (!isSeeking) return;
+  seekToPosition(e.clientX);
+});
+
+window.addEventListener('mouseup', () => {
+  if (!isSeeking) return;
+  isSeeking = false;
+  hideSeekBar();
+  updateProgress();
+});
+
+// ==================== List & Settings Views ====================
+function openList() {
+  document.getElementById('list-view').classList.add('show');
+  renderCategoryBar();
+  updateTrackList();
+}
+
+function closeList() {
+  closeAllRevealedItems();
+  if (batchMode) exitBatchMode();
+  document.getElementById('list-view').classList.remove('show');
+}
+
+function openSettings() {
+  document.getElementById('settings-view').classList.add('show');
+  renderSettingsColors();
+}
+
+function closeSettings() {
+  document.getElementById('settings-view').classList.remove('show');
+}
+
+document.getElementById('listBtn').addEventListener('click', openList);
+document.getElementById('backBtn').addEventListener('click', closeList);
+document.getElementById('settingsBtn').addEventListener('click', openSettings);
+document.getElementById('settingsBackBtn').addEventListener('click', closeSettings);
+
+document.getElementById('beautifyToggle').addEventListener('click', () => {
+  const section = document.getElementById('beautifySection');
+  section.classList.toggle('collapsed');
+});
+
+document.getElementById('dataToggle').addEventListener('click', () => {
+  const section = document.getElementById('dataSection');
+  section.classList.toggle('collapsed');
+});
+
+// Background image upload
+document.getElementById('bgImageInput').addEventListener('change', async e => {
+  const files = Array.from(e.target.files);
+  if (files.length === 0) return;
+  for (const file of files) {
+    const url = URL.createObjectURL(file);
+    const fileKey = 'img-bg-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+    try { await dbPut(fileKey, file); } catch(err) { console.warn('IndexedDB:', err); }
+    settings.bgImages.push({ url, _fileKey: fileKey });
+  }
+  settings.bgImageIndex = settings.bgImages.length - 1;
+  applySettings();
+  saveAllData();
+  showToast(`已添加 ${files.length} 张图片`);
+  e.target.value = '';
+});
+
+document.getElementById('bgOpacitySlider').addEventListener('input', e => {
+  settings.bgOpacity = parseInt(e.target.value) / 100;
+  document.getElementById('bgOpacityValue').textContent = e.target.value + '%';
+  applySettings();
+  saveAllData();
+});
+
+document.getElementById('recordOpacitySlider').addEventListener('input', e => {
+  settings.recordOpacity = parseInt(e.target.value) / 100;
+  document.getElementById('recordOpacityValue').textContent = e.target.value + '%';
+  applySettings();
+  saveAllData();
+});
+
+document.getElementById('labelOpacitySlider').addEventListener('input', e => {
+  settings.labelOpacity = parseInt(e.target.value) / 100;
+  document.getElementById('labelOpacityValue').textContent = e.target.value + '%';
+  applySettings();
+  saveAllData();
+});
+
+document.getElementById('opacitySlider').addEventListener('input', e => {
+  settings.bgOpacityImage = parseInt(e.target.value) / 100;
+  document.getElementById('opacityValue').textContent = e.target.value + '%';
+  applySettings();
+  saveAllData();
+});
+
+document.getElementById('recordImageInput').addEventListener('change', async e => {
+  const files = Array.from(e.target.files);
+  if (files.length === 0) return;
+  for (const file of files) {
+    const url = URL.createObjectURL(file);
+    const fileKey = 'img-rec-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+    try { await dbPut(fileKey, file); } catch(err) { console.warn('IndexedDB:', err); }
+    settings.recordImages.push({ url, _fileKey: fileKey });
+  }
+  settings.recordImageIndex = settings.recordImages.length - 1;
+  applySettings();
+  saveAllData();
+  showToast(`已添加 ${files.length} 张唱片图片`);
+  e.target.value = '';
+});
+
+document.getElementById('labelImageInput').addEventListener('change', async e => {
+  const files = Array.from(e.target.files);
+  if (files.length === 0) return;
+  for (const file of files) {
+    const url = URL.createObjectURL(file);
+    const fileKey = 'img-lbl-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+    try { await dbPut(fileKey, file); } catch(err) { console.warn('IndexedDB:', err); }
+    settings.labelImages.push({ url, _fileKey: fileKey });
+  }
+  settings.labelImageIndex = settings.labelImages.length - 1;
+  applySettings();
+  saveAllData();
+  showToast(`已添加 ${files.length} 张标签图片`);
+  e.target.value = '';
+});
+
+document.getElementById('recordImgOpacitySlider').addEventListener('input', e => {
+  settings.recordOpacityImage = parseInt(e.target.value) / 100;
+  document.getElementById('recordImgOpacityValue').textContent = e.target.value + '%';
+  applySettings();
+  saveAllData();
+});
+
+document.getElementById('labelImgOpacitySlider').addEventListener('input', e => {
+  settings.labelOpacityImage = parseInt(e.target.value) / 100;
+  document.getElementById('labelImgOpacityValue').textContent = e.target.value + '%';
+  applySettings();
+  saveAllData();
+});
+
+// ==================== 导出/导入功能 ====================
+
+// 辅助函数：将 blob URL 转换为 base64
+async function blobUrlToBase64(url) {
+  try {
+    const response = await fetch(url);
+    const blob = await response.blob();
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result);
+      reader.readAsDataURL(blob);
+    });
+  } catch (e) {
+    console.warn('blob转base64失败:', e);
+    return null;
+  }
+}
+
+// 辅助函数：将 base64 还原为 blob 并存入 IndexedDB
+async function base64ToBlobAndStore(dataUrl, fileKey) {
+  try {
+    const response = await fetch(dataUrl);
+    const blob = await response.blob();
+    await dbPut(fileKey, blob);
+    return blob;
+  } catch (e) {
+    console.warn('base64还原失败:', e);
+    return null;
+  }
+}
+
+// 导出按钮
+document.getElementById('exportBtn').addEventListener('click', async function() {
+  if (tracks.length === 0 && settings.bgImages.length === 0 && settings.recordImages.length === 0 && settings.labelImages.length === 0) {
+    showToast('暂无数据可导出');
+    return;
+  }
+
+  showToast('正在导出...');
+
+  try {
+    // 处理音频
+    const exportTracks = [];
+    for (const t of tracks) {
+      const item = {
+        id: t.id,
+        name: t.name,
+        type: t.type || 'audio',
+        categoryId: t.categoryId || 'cat-0'
+      };
+      if (t.src && t.src.startsWith('blob:')) {
+        const base64 = await blobUrlToBase64(t.src);
+        if (base64) {
+          item.srcData = base64;
+        } else {
+          item.src = t.src;
+        }
+      } else if (t.src) {
+        item.src = t.src;
+      }
+      exportTracks.push(item);
+    }
+
+    // 处理图片
+    async function processImagesToBase64(imgList) {
+      const result = [];
+      for (const img of imgList) {
+        let url = typeof img === 'string' ? img : (img && img.url ? img.url : '');
+        if (!url) continue;
+        if (url.startsWith('blob:')) {
+          const base64 = await blobUrlToBase64(url);
+          if (base64) {
+            result.push({ srcData: base64 });
+          }
+        } else {
+          result.push({ src: url });
+        }
+      }
+      return result;
+    }
+
+    const exportBg = await processImagesToBase64(settings.bgImages);
+    const exportRecord = await processImagesToBase64(settings.recordImages);
+    const exportLabel = await processImagesToBase64(settings.labelImages);
+
+    // 组装数据
+    const exportData = {
+      app: '音轨',
+      version: '1.2.1',
+      exportDate: new Date().toISOString(),
+      tracks: exportTracks,
+      categories: categories,
+      settings: {
+        bgColor: settings.bgColor,
+        recordColor: settings.recordColor,
+        labelColor: settings.labelColor,
+        bgOpacity: settings.bgOpacity,
+        recordOpacity: settings.recordOpacity,
+        labelOpacity: settings.labelOpacity,
+        bgOpacityImage: settings.bgOpacityImage,
+        recordOpacityImage: settings.recordOpacityImage,
+        labelOpacityImage: settings.labelOpacityImage,
+        bgImageIndex: settings.bgImageIndex,
+        recordImageIndex: settings.recordImageIndex,
+        labelImageIndex: settings.labelImageIndex,
+        bgImages: exportBg,
+        recordImages: exportRecord,
+        labelImages: exportLabel
+      },
+      currentCategoryId: currentCategoryId,
+      currentIndex: currentIndex,
+      playMode: playMode,
+      nextTrackId: nextTrackId,
+      nextCategoryId: nextCategoryId
+    };
+
+    const jsonStr = JSON.stringify(exportData, null, 2);
+    const fileName = `音轨_备份_${new Date().toISOString().slice(0, 10)}.json`;
+
+    // 使用 Cordova 保存到手机存储
+    if (window.cordova && window.resolveLocalFileSystemURL) {
+      let savePath = cordova.file.externalRootDirectory || 
+                     cordova.file.externalDataDirectory || 
+                     cordova.file.dataDirectory || 
+                     cordova.file.filesDirectory;
+
+      try {
+        const dirEntry = await new Promise((resolve, reject) => {
+          window.resolveLocalFileSystemURL(savePath, resolve, reject);
+        });
+        const fileEntry = await new Promise((resolve, reject) => {
+          dirEntry.getFile(fileName, { create: true, exclusive: false }, resolve, reject);
+        });
+        const writer = await new Promise((resolve, reject) => {
+          fileEntry.createWriter(resolve, reject);
+        });
+        const blob = new Blob([jsonStr], { type: 'application/json' });
+        writer.write(blob);
+        await new Promise((resolve, reject) => {
+          writer.onwriteend = resolve;
+          writer.onerror = reject;
+        });
+        
+        const fullPath = savePath + fileName;
+        showToast('✅ 导出成功！文件保存在: ' + fullPath);
+        console.log('导出成功，文件路径:', fullPath);
+        return;
+      } catch (e) {
+        console.warn('Cordova保存失败，使用降级方案:', e);
+      }
+    }
+
+    // 降级方案
+    const blob = new Blob([jsonStr], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+    showToast('✅ 导出成功！文件在下载文件夹');
+
+  } catch (e) {
+    console.error('导出失败:', e);
+    showToast('导出失败：' + e.message);
+  }
+});
+
+// 导入按钮
+document.getElementById('importBtn').addEventListener('click', function() {
+  document.getElementById('importInput').click();
+});
+
+document.getElementById('importInput').addEventListener('change', async function(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  e.target.value = '';
+
+  try {
+    const text = await file.text();
+    const data = JSON.parse(text);
+
+    if (!data.tracks && !data.settings && !data.categories) {
+      showToast('文件格式不正确');
+      return;
+    }
+
+    let msg = '将导入以下数据：\n';
+    if (data.tracks) msg += `• ${data.tracks.length} 首曲目\n`;
+    if (data.categories) msg += `• ${data.categories.length} 个分类\n`;
+    if (data.settings) {
+      if (data.settings.bgImages && data.settings.bgImages.length > 0) msg += `• ${data.settings.bgImages.length} 张背景图片\n`;
+      if (data.settings.recordImages && data.settings.recordImages.length > 0) msg += `• ${data.settings.recordImages.length} 张唱片图片\n`;
+      if (data.settings.labelImages && data.settings.labelImages.length > 0) msg += `• ${data.settings.labelImages.length} 张标签图片\n`;
+    }
+    msg += '\n⚠️ 这将替换当前所有数据，确定继续吗？';
+
+    const confirmed = await showModal({
+      title: '导入数据',
+      bodyHTML: msg.replace(/\n/g, '<br>'),
+      buttons: [
+        { text: '取消', value: false, style: 'cancel' },
+        { text: '导入', value: true, style: 'confirm' }
+      ]
+    });
+    if (!confirmed) return;
+
+    pause();
+    currentMedia.src = '';
+
+    // 恢复 tracks
+    if (data.tracks && data.tracks.length > 0) {
+      const newTracks = [];
+      for (const t of data.tracks) {
+        let src = t.src || '';
+        let fileKey = null;
+
+        if (t.srcData && t.srcData.startsWith('data:')) {
+          const key = 'audio-import-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+          const blob = await base64ToBlobAndStore(t.srcData, key);
+          if (blob) {
+            src = URL.createObjectURL(blob);
+            fileKey = key;
+          }
+        }
+
+        newTracks.push({
+          id: t.id || nextTrackId++,
+          name: t.name || '未命名',
+          src: src,
+          type: t.type || 'audio',
+          categoryId: t.categoryId || 'cat-0',
+          _fileKey: fileKey
+        });
+      }
+      tracks = newTracks;
+      nextTrackId = tracks.length;
+    }
+
+    // 恢复 categories
+    if (data.categories && Array.isArray(data.categories) && data.categories.length > 0) {
+      const hasDefault = data.categories.some(c => c.id === 'cat-0');
+      if (!hasDefault) data.categories.unshift({ id: 'cat-0', name: '默认' });
+      categories = data.categories;
+      nextCategoryId = Math.max(1, ...categories.map((c) => {
+        const match = c.id && c.id.match(/cat-(\d+)/);
+        return match ? parseInt(match[1]) : 0;
+      })) + 1;
+    }
+
+    // 恢复 settings
+    if (data.settings) {
+      const s = data.settings;
+      if (s.bgColor) settings.bgColor = s.bgColor;
+      if (s.recordColor) settings.recordColor = s.recordColor;
+      if (s.labelColor) settings.labelColor = s.labelColor;
+      if (s.bgOpacity !== undefined) settings.bgOpacity = s.bgOpacity;
+      if (s.recordOpacity !== undefined) settings.recordOpacity = s.recordOpacity;
+      if (s.labelOpacity !== undefined) settings.labelOpacity = s.labelOpacity;
+      if (s.bgOpacityImage !== undefined) settings.bgOpacityImage = s.bgOpacityImage;
+      if (s.recordOpacityImage !== undefined) settings.recordOpacityImage = s.recordOpacityImage;
+      if (s.labelOpacityImage !== undefined) settings.labelOpacityImage = s.labelOpacityImage;
+
+      async function restoreImages(imgList) {
+        const result = [];
+        for (const img of imgList || []) {
+          if (img.srcData && img.srcData.startsWith('data:')) {
+            const key = 'img-import-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+            const blob = await base64ToBlobAndStore(img.srcData, key);
+            if (blob) {
+              result.push({ url: URL.createObjectURL(blob), _fileKey: key });
+            }
+          } else if (img.src) {
+            result.push(img.src);
+          }
+        }
+        return result;
+      }
+
+      if (s.bgImages) settings.bgImages = await restoreImages(s.bgImages);
+      if (s.recordImages) settings.recordImages = await restoreImages(s.recordImages);
+      if (s.labelImages) settings.labelImages = await restoreImages(s.labelImages);
+
+      if (s.bgImageIndex !== undefined && s.bgImageIndex < settings.bgImages.length) settings.bgImageIndex = s.bgImageIndex;
+      else settings.bgImageIndex = settings.bgImages.length - 1;
+      if (s.recordImageIndex !== undefined && s.recordImageIndex < settings.recordImages.length) settings.recordImageIndex = s.recordImageIndex;
+      else settings.recordImageIndex = settings.recordImages.length - 1;
+      if (s.labelImageIndex !== undefined && s.labelImageIndex < settings.labelImages.length) settings.labelImageIndex = s.labelImageIndex;
+      else settings.labelImageIndex = settings.labelImages.length - 1;
+    }
+
+    // 恢复状态
+    if (data.currentCategoryId) currentCategoryId = data.currentCategoryId;
+    if (data.playMode) playMode = data.playMode;
+    if (data.nextTrackId) nextTrackId = data.nextTrackId;
+    if (data.nextCategoryId) nextCategoryId = data.nextCategoryId;
+    if (data.currentIndex !== undefined && data.currentIndex < tracks.length) {
+      currentIndex = data.currentIndex;
+    }
+
+    applySettings();
+    renderCategoryBar();
+    if (tracks.length > 0) {
+      loadTrack(currentIndex < tracks.length ? currentIndex : 0);
+    } else {
+      labelText.textContent = '音轨';
+    }
+    updateTrackList();
+    saveAllData();
+    showToast(`✅ 导入成功！共 ${tracks.length} 首曲目，${categories.length} 个分类`);
+
+  } catch (err) {
+    console.error('导入失败:', err);
+    showToast('导入失败：文件格式错误或数据损坏');
+  }
+});
+
+// ==================== Settings: Color Customization ====================
+function renderColorSwatches(containerId, presets, currentColor, onPick) {
+  const container = document.getElementById(containerId);
+  container.innerHTML = '';
+
+  presets.forEach(preset => {
+    const sw = document.createElement('div');
+    sw.className = 'color-swatch' + (preset.color.toLowerCase() === currentColor.toLowerCase() ? ' selected' : '');
+    sw.style.background = preset.color;
+    sw.title = preset.name;
+    sw.addEventListener('click', () => onPick(preset.color));
+    container.appendChild(sw);
+  });
+
+  const customWrap = document.createElement('div');
+  customWrap.className = 'color-custom-wrap';
+  const customInput = document.createElement('input');
+  customInput.type = 'color';
+  customInput.className = 'color-custom';
+  customInput.value = currentColor;
+  customInput.addEventListener('input', e => onPick(e.target.value));
+  customWrap.appendChild(customInput);
+  const customLabel = document.createElement('span');
+  customLabel.className = 'color-custom-label';
+  customLabel.textContent = '+';
+  customWrap.appendChild(customLabel);
+  container.appendChild(customWrap);
+}
+
+function renderSettingsColors() {
+  renderColorSwatches('bgSwatches', BG_PRESETS, settings.bgColor, color => {
+    settings.bgColor = color;
+    applySettings();
+    renderSettingsColors();
+    saveAllData();
+  });
+  renderColorSwatches('recordSwatches', RECORD_PRESETS, settings.recordColor, color => {
+    settings.recordColor = color;
+    applySettings();
+    renderSettingsColors();
+    saveAllData();
+  });
+  renderColorSwatches('labelSwatches', LABEL_PRESETS, settings.labelColor, color => {
+    settings.labelColor = color;
+    applySettings();
+    renderSettingsColors();
+    saveAllData();
+  });
+}
+
+// ==================== Category Bar ====================
+function renderCategoryBar() {
+  categoryBar.innerHTML = '';
+  categories.forEach(cat => {
+    const pill = document.createElement('div');
+    pill.className = 'category-pill' + (cat.id === currentCategoryId ? ' active' : '');
+    pill.textContent = cat.name;
+    pill.dataset.catId = cat.id;
+    attachLongPress(pill, () => showCategoryEdit(cat.id));
+    pill.addEventListener('click', () => {
+      if (pill.dataset.longPressed === '1') { pill.dataset.longPressed = '0'; return; }
+      currentCategoryId = cat.id;
+      renderCategoryBar();
+      updateTrackList();
+      saveAllData();
+    });
+    categoryBar.appendChild(pill);
+  });
+  const addBtn = document.createElement('div');
+  addBtn.className = 'category-add';
+  addBtn.textContent = '+';
+  addBtn.addEventListener('click', () => showCategoryAdd());
+  categoryBar.appendChild(addBtn);
+}
+
+async function showCategoryAdd() {
+  const name = await showModal({
+    title: '添加分类',
+    bodyHTML: '<input type="text" class="modal-input" placeholder="分类名称" maxlength="20">',
+    buttons: [
+      { text: '取消', value: null, style: 'cancel' },
+      { text: '添加', style: 'confirm', onClick: () => modalBody.querySelector('input').value.trim() }
+    ]
+  });
+  if (!name) return;
+  const newId = `cat-${nextCategoryId++}`;
+  categories.push({ id: newId, name });
+  currentCategoryId = newId;
+  renderCategoryBar();
+  updateTrackList();
+  saveAllData();
+  showToast('分类已添加');
+}
+
+async function showCategoryEdit(catId) {
+  const cat = categories.find(c => c.id === catId);
+  if (!cat) return;
+  const isDefault = catId === 'cat-0';
+  const trackCount = tracks.filter(t => t.categoryId === catId).length;
+  const name = await showModal({
+    title: '编辑分类',
+    bodyHTML: `<input type="text" class="modal-input" value="${cat.name}" maxlength="20">`,
+    buttons: [
+      { text: '取消', value: null, style: 'cancel' },
+      !isDefault ? { text: '删除', style: 'danger', onClick: () => '__DELETE__' } : null,
+      { text: '保存', style: 'confirm', onClick: () => modalBody.querySelector('input').value.trim() }
+    ].filter(Boolean)
+  });
+  if (name === '__DELETE__') {
+    const confirmed = await showModal({
+      title: '删除分类',
+      bodyHTML: `删除「${cat.name}」后，其中 ${trackCount} 首曲目将移至「默认」分类。确定删除？`,
+      buttons: [
+        { text: '取消', value: false, style: 'cancel' },
+        { text: '删除', value: true, style: 'danger' }
+      ]
+    });
+    if (!confirmed) return;
+    tracks.forEach(t => { if (t.categoryId === catId) t.categoryId = 'cat-0'; });
+    categories = categories.filter(c => c.id !== catId);
+    if (currentCategoryId === catId) currentCategoryId = 'cat-0';
+    renderCategoryBar();
+    updateTrackList();
+    saveAllData();
+    showToast('分类已删除');
+    return;
+  }
+  if (name && name !== cat.name) {
+    cat.name = name;
+    renderCategoryBar();
+    updateTrackList();
+    saveAllData();
+    showToast('分类已更新');
+  }
+}
+
+// ==================== Track List ====================
+function getFilteredTrackIndices() {
+  const result = [];
+  tracks.forEach((track, index) => {
+    if (track.categoryId === currentCategoryId) result.push(index);
+  });
+  return result;
+}
+
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+function updateTrackList() {
+  const filteredIndices = getFilteredTrackIndices();
+  if (filteredIndices.length === 0) {
+    trackList.innerHTML = `<div class="empty-list"><div class="empty-icon">♪</div>暂无曲目，请添加音频文件</div>`;
+    return;
+  }
+  trackList.innerHTML = filteredIndices.map((trackIdx, displayIdx) => {
+    const track = tracks[trackIdx];
+    const isActive = trackIdx === currentIndex;
+    const playing = isActive && isPlaying;
+    const typeLabel = track.type === 'video' ? '视频音频' : '音频';
+    const typeClass = track.type === 'video' ? 'video' : '';
+    const batchCls = batchMode ? 'batch-mode' : '';
+    const batchSel = batchSelected.has(trackIdx) ? 'batch-selected' : '';
+    const batchCheckHtml = '<div class="batch-check"></div>';
+    return `
+      <div class="track-item ${batchCls} ${batchSel} ${isActive ? 'active' : ''}" data-track-index="${trackIdx}" data-display-index="${displayIdx}">
+        <div class="track-actions">
+          <div class="track-action edit" data-action="edit">编辑</div>
+          <div class="track-action delete" data-action="delete">删除</div>
+        </div>
+        <div class="track-item-content">
+          ${batchMode ? batchCheckHtml : ''}
+          <span class="track-number">${playing ? '▶' : (displayIdx + 1)}</span>
+          <div class="track-info-cell">
+            <div class="track-name">${escapeHtml(track.name)}</div>
+            <div class="track-type ${typeClass}">${typeLabel}</div>
+          </div>
+          <span class="track-drag-handle">⋮⋮</span>
+        </div>
+      </div>`;
+  }).join('');
+  attachTrackItemListeners();
+  updateBatchUI();
+}
+
+function attachTrackItemListeners() {
+  trackList.querySelectorAll('.track-item').forEach(item => {
+    const content = item.querySelector('.track-item-content');
+    const editBtn = item.querySelector('.track-action.edit');
+    const deleteBtn = item.querySelector('.track-action.delete');
+
+    if (batchMode) {
+      content.addEventListener('touchend', e => {
+        e.preventDefault();
+        toggleBatchSelect(parseInt(item.dataset.trackIndex));
+      }, { passive: false });
+      content.addEventListener('click', e => {
+        e.preventDefault();
+        e.stopPropagation();
+      });
+      return;
+    }
+
+    function handleBtnTouch(btn, action) {
+      btn.addEventListener('touchstart', e => {
+        e.stopPropagation();
+      }, { passive: true });
+      btn.addEventListener('touchmove', e => {
+        e.stopPropagation();
+      }, { passive: true });
+      btn.addEventListener('touchend', e => {
+        e.preventDefault();
+        e.stopPropagation();
+        closeAllRevealedItems();
+        action(parseInt(item.dataset.trackIndex));
+      }, { passive: false });
+      btn.addEventListener('click', e => {
+        e.stopPropagation();
+      });
+    }
+    handleBtnTouch(editBtn, showTrackEdit);
+    handleBtnTouch(deleteBtn, showTrackDeleteConfirm);
+
+    attachTrackItemGestures(content, item);
+  });
+}
+
+// ==================== Track Item Gestures ====================
+function attachTrackItemGestures(content, item) {
+  let startX = 0, startY = 0, startTime = 0;
+  let deltaX = 0, deltaY = 0;
+  let lastDeltaY = 0;
+  let mode = 'pending';
+  let longPressTimer = null;
+  let itemHeight = 0;
+  let dragStartIndex = -1;
+  let allItems = [];
+  let trackIndices = [];
+  let lastTargetIndex = -1;
+  let autoScrollRAF = null;
+  let isHandleTouch = false;
+
+  content.addEventListener('touchstart', e => {
+    if (e.touches.length > 1) return;
+    const t = e.touches[0];
+    isHandleTouch = e.target.classList && e.target.classList.contains('track-drag-handle');
+    startX = t.clientX;
+    startY = t.clientY;
+    startTime = Date.now();
+    deltaX = 0;
+    deltaY = 0;
+    lastDeltaY = 0;
+    mode = 'pending';
+    itemHeight = content.offsetHeight || 60;
+    content.style.transition = 'none';
+
+    longPressTimer = setTimeout(() => {
+      if (mode === 'pending') {
+        if (isHandleTouch) {
+          mode = 'drag';
+          content.classList.add('dragging');
+          item.classList.add('dragging-mode');
+          trackList.querySelectorAll('.track-item').forEach(it => it.classList.add('dragging-mode'));
+          if (navigator.vibrate) navigator.vibrate(50);
+          allItems = Array.from(trackList.querySelectorAll('.track-item'));
+          trackIndices = getFilteredTrackIndices();
+          dragStartIndex = parseInt(item.dataset.displayIndex);
+          lastTargetIndex = dragStartIndex;
+        } else {
+          const trackIdx = parseInt(item.dataset.trackIndex);
+          if (navigator.vibrate) navigator.vibrate(50);
+          enterBatchMode(trackIdx);
+          mode = 'batch';
+        }
+      }
+    }, 400);
+  }, { passive: true });
+
+  content.addEventListener('touchmove', e => {
+    const t = e.touches[0];
+    deltaX = t.clientX - startX;
+    deltaY = t.clientY - startY;
+    const absDx = Math.abs(deltaX);
+    const absDy = Math.abs(deltaY);
+
+    if (mode === 'pending') {
+      if (absDx > 12 || absDy > 12) {
+        clearTimeout(longPressTimer);
+        longPressTimer = null;
+
+        if (absDx > absDy) {
+          mode = 'swipe';
+          trackList.querySelectorAll('.track-item-content.revealed, .track-item-content.near-revealed').forEach(el => {
+            if (el !== content) {
+              el.style.transition = '';
+              el.classList.remove('revealed');
+              el.classList.remove('near-revealed');
+              el.style.transform = '';
+            }
+          });
+        } else {
+          mode = 'scroll';
+          lastDeltaY = deltaY;
+          content.style.transition = '';
+          content.style.transform = '';
+        }
+      } else {
+        e.preventDefault();
+        return;
+      }
+    }
+
+    if (mode === 'swipe') {
+      e.preventDefault();
+      let translate = deltaX;
+      if (content.classList.contains('revealed')) translate = deltaX - 144;
+      if (translate > 0) translate = translate * 0.3;
+      if (translate < -144) translate = -144 + (translate + 144) * 0.3;
+      content.style.transform = `translateX(${translate}px)`;
+    } else if (mode === 'scroll') {
+      e.preventDefault();
+      const scrollDelta = deltaY - lastDeltaY;
+      trackListWrapper.scrollTop -= scrollDelta;
+      lastDeltaY = deltaY;
+    } else if (mode === 'drag') {
+      e.preventDefault();
+      content.style.transform = `translateY(${deltaY}px) scale(1.02)`;
+
+      const wrapperRect = trackListWrapper.getBoundingClientRect();
+      const contentRect = content.getBoundingClientRect();
+      const dragY = contentRect.top + contentRect.height / 2;
+      const edgeThreshold = 80;
+
+      if (autoScrollRAF) cancelAnimationFrame(autoScrollRAF);
+      if (dragY < wrapperRect.top + edgeThreshold) {
+        const speed = Math.min(15, (wrapperRect.top + edgeThreshold - dragY) / 5);
+        autoScrollRAF = requestAnimationFrame(function autoScroll() {
+          trackListWrapper.scrollTop -= speed;
+          autoScrollRAF = requestAnimationFrame(autoScroll);
+        });
+      } else if (dragY > wrapperRect.bottom - edgeThreshold) {
+        const speed = Math.min(15, (dragY - (wrapperRect.bottom - edgeThreshold)) / 5);
+        autoScrollRAF = requestAnimationFrame(function autoScroll() {
+          trackListWrapper.scrollTop += speed;
+          autoScrollRAF = requestAnimationFrame(autoScroll);
+        });
+      }
+
+      const targetIdx = Math.max(0, Math.min(allItems.length - 1,
+        dragStartIndex + Math.round(deltaY / itemHeight)));
+
+      if (targetIdx !== lastTargetIndex) {
+        lastTargetIndex = targetIdx;
+        allItems.forEach((otherItem, idx) => {
+          if (idx === dragStartIndex) return;
+          const otherContent = otherItem.querySelector('.track-item-content');
+          otherContent.style.transition = 'transform 0.2s ease';
+
+          if (dragStartIndex < targetIdx) {
+            if (idx > dragStartIndex && idx <= targetIdx) {
+              otherContent.style.transform = `translateY(${-itemHeight}px)`;
+            } else {
+              otherContent.style.transform = '';
+            }
+          } else if (dragStartIndex > targetIdx) {
+            if (idx >= targetIdx && idx < dragStartIndex) {
+              otherContent.style.transform = `translateY(${itemHeight}px)`;
+            } else {
+              otherContent.style.transform = '';
+            }
+          } else {
+            otherContent.style.transform = '';
+          }
+        });
+      }
+      item.dataset.targetIndex = targetIdx;
+    }
+  }, { passive: false });
+
+  content.addEventListener('touchend', e => {
+    clearTimeout(longPressTimer);
+    longPressTimer = null;
+    if (autoScrollRAF) { cancelAnimationFrame(autoScrollRAF); autoScrollRAF = null; }
+
+    const absDx = Math.abs(deltaX);
+    const absDy = Math.abs(deltaY);
+    const dt = Date.now() - startTime;
+
+    if (mode === 'swipe') {
+      content.style.transition = '';
+      let translate = deltaX;
+      if (content.classList.contains('revealed')) translate = deltaX - 144;
+      if (translate < -72) {
+        content.classList.add('revealed');
+        content.classList.remove('near-revealed');
+        content.style.transform = '';
+      } else if (translate < -36) {
+        content.classList.remove('revealed');
+        content.classList.add('near-revealed');
+        content.style.transform = '';
+      } else {
+        content.classList.remove('revealed');
+        content.classList.remove('near-revealed');
+        content.style.transform = '';
+      }
+    } else if (mode === 'drag') {
+      content.classList.remove('dragging');
+      trackList.querySelectorAll('.track-item').forEach(it => it.classList.remove('dragging-mode'));
+      content.style.transition = '';
+      content.style.transform = '';
+
+      allItems.forEach(otherItem => {
+        const otherContent = otherItem.querySelector('.track-item-content');
+        otherContent.style.transition = '';
+        otherContent.style.transform = '';
+      });
+
+      const targetIdx = parseInt(item.dataset.targetIndex || dragStartIndex);
+      if (targetIdx !== dragStartIndex && targetIdx >= 0 && targetIdx < trackIndices.length) {
+        const fromIdx = trackIndices[dragStartIndex];
+        const toIdx = trackIndices[targetIdx];
+        const movedTrack = tracks[fromIdx];
+        tracks.splice(fromIdx, 1);
+        tracks.splice(toIdx, 0, movedTrack);
+
+        if (currentIndex === fromIdx) {
+          currentIndex = toIdx;
+        } else if (fromIdx < currentIndex && toIdx >= currentIndex) {
+          currentIndex--;
+        } else if (fromIdx > currentIndex && toIdx <= currentIndex) {
+          currentIndex++;
+        }
+
+        showToast('已重新排序');
+      }
+      delete item.dataset.targetIndex;
+      updateTrackList();
+      saveAllData();
+    } else if (mode === 'batch') {
+    } else if (mode === 'scroll') {
+      content.style.transition = '';
+      content.style.transform = '';
+    } else if (mode === 'pending' && absDx < 12 && absDy < 12 && dt < 500) {
+      content.style.transition = '';
+      content.style.transform = '';
+      if (content.classList.contains('revealed') || content.classList.contains('near-revealed')) {
+        content.classList.remove('revealed');
+        content.classList.remove('near-revealed');
+      } else {
+        selectTrack(parseInt(item.dataset.trackIndex));
+      }
+    } else {
+      content.style.transition = '';
+      content.style.transform = '';
+    }
+    mode = 'pending';
+  }, { passive: true });
+
+  content.addEventListener('contextmenu', e => e.preventDefault());
+}
+
+function closeAllRevealedItems() {
+  trackList.querySelectorAll('.track-item-content.revealed, .track-item-content.near-revealed').forEach(el => {
+    el.classList.remove('revealed');
+    el.classList.remove('near-revealed');
+    el.style.transform = '';
+  });
+}
+
+// ==================== Track Edit / Delete ====================
+async function showTrackEdit(trackIdx) {
+  const track = tracks[trackIdx];
+  if (!track) return;
+  const catOptions = categories.map(c =>
+    `<option value="${c.id}" ${c.id === track.categoryId ? 'selected' : ''}>${escapeHtml(c.name)}</option>`
+  ).join('');
+  const result = await showModal({
+    title: '编辑曲目',
+    bodyHTML: `
+      <input type="text" class="modal-input" value="${escapeHtml(track.name)}" maxlength="50" style="margin-bottom: 12px;">
+      <select class="modal-input" style="appearance: auto; -webkit-appearance: none;">
+        ${catOptions}
+      </select>`,
+    buttons: [
+      { text: '取消', value: null, style: 'cancel' },
+      { text: '保存', style: 'confirm', onClick: () => {
+        const input = modalBody.querySelector('input');
+        const select = modalBody.querySelector('select');
+        return { name: input.value.trim(), catId: select.value };
+      }}
+    ]
+  });
+  if (!result) return;
+  if (result.name && result.name !== track.name) track.name = result.name;
+  if (result.catId && result.catId !== track.categoryId) {
+    track.categoryId = result.catId;
+    currentCategoryId = result.catId;
+    renderCategoryBar();
+  }
+  updateTrackList();
+  if (trackIdx === currentIndex) {
+    labelText.textContent = track.name;
+    updateMediaSession();
+  }
+  showToast('曲目已更新');
+  saveAllData();
+}
+
+async function showTrackDeleteConfirm(trackIdx) {
+  const track = tracks[trackIdx];
+  if (!track) return;
+  const confirmed = await showModal({
+    title: '删除曲目',
+    bodyHTML: `确定删除「${escapeHtml(track.name)}」吗？`,
+    buttons: [
+      { text: '取消', value: false, style: 'cancel' },
+      { text: '删除', value: true, style: 'danger' }
+    ]
+  });
+  if (!confirmed) return;
+  if (track.src.startsWith('blob:')) URL.revokeObjectURL(track.src);
+  if (track._fileKey) { dbDelete(track._fileKey).catch(()=>{}); }
+  tracks.splice(trackIdx, 1);
+  if (tracks.length === 0) {
+    pause();
+    currentMedia.src = '';
+    labelText.textContent = '音轨';
+    currentIndex = 0;
+  } else {
+    if (trackIdx === currentIndex) {
+      if (currentIndex >= tracks.length) currentIndex = 0;
+      loadTrack(currentIndex);
+      if (isPlaying) play();
+    } else if (trackIdx < currentIndex) {
+      currentIndex--;
+    }
+  }
+  updateTrackList();
+  saveAllData();
+  showToast('已删除');
+}
+
+// ==================== Batch Delete ====================
+function toggleBatchSelect(trackIdx) {
+  if (batchSelected.has(trackIdx)) {
+    batchSelected.delete(trackIdx);
+  } else {
+    batchSelected.add(trackIdx);
+  }
+  updateTrackList();
+}
+
+function updateBatchUI() {
+  const count = batchSelected.size;
+  batchCountEl.textContent = `已选 ${count} 项`;
+  batchDeleteConfirm.disabled = count === 0;
+  batchCategorizeBtn.disabled = count === 0;
+
+  const filtered = getFilteredTrackIndices();
+  const allSelected = filtered.length > 0 && filtered.every(idx => batchSelected.has(idx));
+  batchSelectAll.classList.toggle('checked', allSelected);
+}
+
+function enterBatchMode(initialTrackIdx) {
+  batchMode = true;
+  batchSelected.clear();
+  closeAllRevealedItems();
+  listActionsEl.classList.add('batch-mode');
+  batchToolbar.classList.add('show');
+  if (initialTrackIdx !== undefined && initialTrackIdx !== null) {
+    batchSelected.add(initialTrackIdx);
+  }
+  updateTrackList();
+}
+
+function exitBatchMode() {
+  batchMode = false;
+  batchSelected.clear();
+  listActionsEl.classList.remove('batch-mode');
+  batchToolbar.classList.remove('show');
+  updateTrackList();
+}
+
+batchSelectAll.addEventListener('click', () => {
+  const filtered = getFilteredTrackIndices();
+  const allSelected = filtered.every(idx => batchSelected.has(idx));
+  if (allSelected) {
+    filtered.forEach(idx => batchSelected.delete(idx));
+  } else {
+    filtered.forEach(idx => batchSelected.add(idx));
+  }
+  updateTrackList();
+});
+
+async function showBatchCategorize() {
+  const count = batchSelected.size;
+  if (count === 0) return;
+
+  const catOptions = categories.map(c => ({
+    text: c.name,
+    value: c.id
+  }));
+  catOptions.unshift({ text: '取消', value: null, style: 'cancel' });
+
+  const result = await showModal({
+    title: '移动到分类',
+    bodyHTML: `将选中的 <strong style="color:var(--accent)">${count}</strong> 首曲目移动到分类：`,
+    buttons: catOptions
+  });
+
+  if (!result) return;
+
+  batchSelected.forEach(idx => {
+    if (tracks[idx]) tracks[idx].categoryId = result;
+  });
+
+  const catName = categories.find(c => c.id === result)?.name || '';
+  exitBatchMode();
+  showToast(`已移动 ${count} 首到「${catName}」`);
+  saveAllData();
+}
+batchCategorizeBtn.addEventListener('click', showBatchCategorize);
+
+batchDeleteConfirm.addEventListener('click', async () => {
+  const count = batchSelected.size;
+  if (count === 0) return;
+
+  const confirmed = await showModal({
+    title: '批量删除',
+    bodyHTML: `确定删除选中的 <strong style="color:var(--delete-red)">${count}</strong> 首曲目吗？`,
+    buttons: [
+      { text: '取消', value: false, style: 'cancel' },
+      { text: '删除', value: true, style: 'danger' }
+    ]
+  });
+  if (!confirmed) return;
+
+  const toDelete = Array.from(batchSelected).sort((a, b) => b - a);
+  toDelete.forEach(idx => {
+    const track = tracks[idx];
+    if (track && track.src.startsWith('blob:')) URL.revokeObjectURL(track.src);
+    if (track && track._fileKey) { dbDelete(track._fileKey).catch(()=>{}); }
+    tracks.splice(idx, 1);
+  });
+
+  batchSelected.clear();
+
+  if (tracks.length === 0) {
+    pause();
+    currentMedia.src = '';
+    labelText.textContent = '音轨';
+    currentIndex = 0;
+  } else {
+    if (toDelete.includes(currentIndex) || currentIndex >= tracks.length) {
+      currentIndex = 0;
+      loadTrack(0);
+      if (isPlaying) play();
+    } else {
+      let adjust = toDelete.filter(idx => idx < currentIndex).length;
+      currentIndex -= adjust;
+    }
+  }
+
+  exitBatchMode();
+  saveAllData();
+  showToast(`已删除 ${count} 首曲目`);
+});
+
+function selectTrack(index) {
+  loadTrack(index);
+  play();
+  closeList();
+}
+
+// ==================== File Management ====================
+
+document.getElementById('addAudioBtn').addEventListener('click', function(e) {
+  audioInput.setAttribute('multiple', 'multiple');
+  audioInput.click();
+});
+
+document.getElementById('extractVideoBtn').addEventListener('click', function(e) {
+  videoInput.setAttribute('multiple', 'multiple');
+  videoInput.click();
+});
+
+audioInput.addEventListener('change', async e => {
+  const files = Array.from(e.target.files);
+  if (files.length === 0) return;
+  for (const file of files) {
+    const url = URL.createObjectURL(file);
+    const name = file.name.replace(/\.[^/.]+$/, '');
+    const fileKey = 'audio-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+    try { await dbPut(fileKey, file); } catch(e) { console.warn('IndexedDB 存储失败:', e); }
+    tracks.push({ id: nextTrackId++, name, src: url, type: 'audio', categoryId: currentCategoryId, _fileKey: fileKey });
+  }
+  updateTrackList();
+  saveAllData();
+  showToast(`已添加 ${files.length} 首音频`);
+  e.target.value = '';
+});
+
+videoInput.addEventListener('change', async e => {
+  const files = Array.from(e.target.files);
+  if (files.length === 0) return;
+  for (const file of files) {
+    const url = URL.createObjectURL(file);
+    const name = file.name.replace(/\.[^/.]+$/, '') + ' (视频音频)';
+    const fileKey = 'video-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+    try { await dbPut(fileKey, file); } catch(e) { console.warn('IndexedDB 存储失败:', e); }
+    tracks.push({ id: nextTrackId++, name, src: url, type: 'video', categoryId: currentCategoryId, _fileKey: fileKey });
+  }
+  updateTrackList();
+  saveAllData();
+  showToast(`已提取 ${files.length} 个视频音频`);
+  e.target.value = '';
+});
+
+// ==================== Long Press Helper ====================
+function attachLongPress(element, callback) {
+  let timer = null;
+  let startX = 0, startY = 0;
+  element.addEventListener('touchstart', e => {
+    const t = e.touches[0];
+    startX = t.clientX;
+    startY = t.clientY;
+    timer = setTimeout(() => {
+      element.dataset.longPressed = '1';
+      if (navigator.vibrate) navigator.vibrate(30);
+      callback();
+    }, 500);
+  }, { passive: true });
+  element.addEventListener('touchmove', e => {
+    const t = e.touches[0];
+    if (Math.abs(t.clientX - startX) > 10 || Math.abs(t.clientY - startY) > 10) {
+      clearTimeout(timer);
+      timer = null;
+    }
+  }, { passive: true });
+  element.addEventListener('touchend', () => { clearTimeout(timer); }, { passive: true });
+}
+
+// ==================== Keyboard Support ====================
+document.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+  const listViewOpen = document.getElementById('list-view').classList.contains('show');
+  const settingsOpen = document.getElementById('settings-view').classList.contains('show');
+
+  if (listViewOpen) { if (e.key === 'Escape') closeList(); return; }
+  if (settingsOpen) { if (e.key === 'Escape') closeSettings(); return; }
+
+  switch (e.key) {
+    case ' ': case 'Spacebar':
+      e.preventDefault(); togglePlay(); break;
+    case 'ArrowLeft':
+      e.preventDefault(); prevTrack(); showToast('上一曲'); break;
+    case 'ArrowRight':
+      e.preventDefault(); nextTrack(); showToast('下一曲'); break;
+  }
+});
+
+recordWrap.addEventListener('contextmenu', e => e.preventDefault());
+
+trackList.addEventListener('click', e => {
+  if (!e.target.closest('.track-item')) closeAllRevealedItems();
+}, true);
+
+trackList.addEventListener('contextmenu', e => e.preventDefault());
+
+// ==================== Init ====================
+applySettings();
+artworkUrl = generateArtwork();
+setupMediaSession();
+loadTrack(0);
+renderCategoryBar();
+updateTrackList();
+
+// ==================== App Init ====================
+function _onDeviceReady() {
+  _deviceReady = true;
+  console.log('[持久化] deviceready 已触发');
+  setupCordovaBridge();
+  (async function() {
+    try {
+      await openDB();
+      const hasData = await loadAllData();
+      if (hasData) {
+        console.log('[持久化] 已恢复历史数据');
+      }
+    } catch (e) {
+      console.warn('[持久化] 初始化失败:', e);
+    }
+    applySettings();
+    renderCategoryBar();
+    renderSettingsColors();
+    if (tracks.length > 0 && currentIndex < tracks.length) {
+      loadTrack(currentIndex);
+    } else if (tracks.length > 0) {
+      currentIndex = 0;
+      loadTrack(0);
+    }
+    updateTrackList();
+  })();
+}
+
+if (window.cordova) {
+  if (typeof cordova !== 'undefined' && cordova.fired) {
+    _onDeviceReady();
+  } else {
+    document.addEventListener('deviceready', _onDeviceReady, false);
+    setTimeout(function() {
+      if (!_deviceReady) {
+        console.warn('[持久化] deviceready 超时，强制加载');
+        _deviceReady = true;
+        (async function() {
+          try {
+            await openDB();
+              const hasData = await loadAllData();
+            if (hasData) console.log('[持久化] 超时后恢复数据');
+          } catch(e) {
+            console.warn('[持久化] 超时加载失败:', e);
+          }
+          applySettings();
+          renderCategoryBar();
+          renderSettingsColors();
+          if (tracks.length > 0 && currentIndex < tracks.length) {
+            loadTrack(currentIndex);
+          } else if (tracks.length > 0) {
+            currentIndex = 0;
+            loadTrack(0);
+          }
+          updateTrackList();
+        })();
+      }
+    }, 3000);
+  }
+} else {
+  (async function initApp() {
+    try {
+      await openDB();
+      const hasData = await loadAllData();
+      if (hasData) console.log('[持久化] 已恢复历史数据');
+    } catch (e) {
+      console.warn('[持久化] 初始化失败:', e);
+    }
+    applySettings();
+    renderCategoryBar();
+    renderSettingsColors();
+    if (tracks.length > 0 && currentIndex < tracks.length) {
+      loadTrack(currentIndex);
+    } else if (tracks.length > 0) {
+      currentIndex = 0;
+      loadTrack(0);
+    }
+    updateTrackList();
+  })();
+}
+
+// ==================== Cordova Integration ====================
+function setupCordovaBridge() {
+  if (!window.YinguMusic) return;
+
+  YinguMusic.onControl(function(action) {
+    switch (action) {
+      case 'toggle': togglePlay(); break;
+      case 'next': nextTrack(); break;
+      case 'prev': prevTrack(); break;
+      case 'play': play(); break;
+      case 'pause': pause(); break;
+    }
+  });
+
+  var _origPlay = play, _origPause = pause, _origLoad = loadTrack;
+  var serviceStarted = false;
+
+  function notifyNative() {
+    try {
+      var name = tracks[currentIndex] ? tracks[currentIndex].name : '音轨';
+      var idx = currentIndex + 1, total = tracks.length;
+
+      if (isPlaying && !serviceStarted) {
+        YinguMusic.startService();
+        serviceStarted = true;
+      }
+
+      YinguMusic.updatePlayback(isPlaying, name, idx, total);
+
+      if (!isPlaying) {
+        serviceStarted = false;
+      }
+    } catch (e) {
+      console.warn('Cordova notifyNative error:', e);
+    }
+  }
+
+  play = function() { _origPlay(); setTimeout(notifyNative, 50); };
+  pause = function() { _origPause(); setTimeout(notifyNative, 50); };
+  loadTrack = function(i) { _origLoad(i); setTimeout(notifyNative, 100); };
+
+  setTimeout(notifyNative, 500);
+}
+
+if (!window.cordova && 'serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').then(reg => {
+      console.log('音轨 Service Worker registered');
+    }).catch(err => {
+      console.warn('SW registration failed:', err);
+    });
+  });
+}
+</script>
+</body>
+</html>
