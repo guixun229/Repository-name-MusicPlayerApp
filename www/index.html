@@ -2939,7 +2939,7 @@ document.getElementById('labelImgOpacitySlider').addEventListener('input', e => 
   saveAllData();
 });
 
-// ==================== Import / Export ====================
+// ==================== 导出/导入功能（修复） ====================
 
 // 辅助函数：将 blob URL 转换为 base64
 async function blobUrlToBase64(url) {
@@ -2970,17 +2970,17 @@ async function base64ToBlobAndStore(dataUrl, fileKey) {
   }
 }
 
-// ==================== 导出 - 包含所有数据 ====================
+// 导出按钮 - 导出所有数据到手机存储
 document.getElementById('exportBtn').addEventListener('click', async function() {
-  if (tracks.length === 0 && settings.bgImages.length === 0 && settings.recordImages.length === 0 && settings.labelImages.length === 0 && categories.length === 0) {
-    showToast('暂无任何数据可导出');
+  if (tracks.length === 0 && settings.bgImages.length === 0 && settings.recordImages.length === 0 && settings.labelImages.length === 0) {
+    showToast('暂无数据可导出');
     return;
   }
 
-  showToast('正在打包导出...');
+  showToast('正在导出...');
 
   try {
-    // 1. 处理音频数据 - 将 blob 转为 base64
+    // 1. 处理音频
     const exportTracks = [];
     for (const t of tracks) {
       const item = {
@@ -2989,31 +2989,25 @@ document.getElementById('exportBtn').addEventListener('click', async function() 
         type: t.type || 'audio',
         categoryId: t.categoryId || 'cat-0'
       };
-
-      // 如果是 blob URL，读取为 base64
       if (t.src && t.src.startsWith('blob:')) {
         const base64 = await blobUrlToBase64(t.src);
         if (base64) {
           item.srcData = base64;
-          item.mimeType = 'audio/mpeg';
         } else {
-          // 如果转换失败，保留原 src（可能已失效）
           item.src = t.src;
         }
       } else if (t.src) {
-        // 网络 URL 直接保留
         item.src = t.src;
       }
       exportTracks.push(item);
     }
 
-    // 2. 处理自定义图片 - 将 blob 转为 base64
+    // 2. 处理图片
     async function processImagesToBase64(imgList) {
       const result = [];
       for (const img of imgList) {
         let url = typeof img === 'string' ? img : (img && img.url ? img.url : '');
         if (!url) continue;
-
         if (url.startsWith('blob:')) {
           const base64 = await blobUrlToBase64(url);
           if (base64) {
@@ -3030,7 +3024,7 @@ document.getElementById('exportBtn').addEventListener('click', async function() 
     const exportRecord = await processImagesToBase64(settings.recordImages);
     const exportLabel = await processImagesToBase64(settings.labelImages);
 
-    // 3. 组装完整导出数据
+    // 3. 组装数据
     const exportData = {
       app: '音轨',
       version: '1.2.1',
@@ -3062,9 +3056,9 @@ document.getElementById('exportBtn').addEventListener('click', async function() 
     };
 
     const jsonStr = JSON.stringify(exportData, null, 2);
-    const fileName = `音轨_完整备份_${new Date().toISOString().slice(0, 10)}.json`;
+    const fileName = `音轨_备份_${new Date().toISOString().slice(0, 10)}.json`;
 
-    // 保存到文件
+    // 保存到手机存储
     if (window.cordova && window.resolveLocalFileSystemURL) {
       const savePath = cordova.file.externalDataDirectory || cordova.file.dataDirectory || cordova.file.filesDirectory;
       if (savePath) {
@@ -3083,12 +3077,12 @@ document.getElementById('exportBtn').addEventListener('click', async function() 
           writer.onwriteend = resolve;
           writer.onerror = reject;
         });
-        showToast('✅ 导出成功！文件保存在：' + savePath + fileName);
+        showToast('✅ 导出成功！');
         return;
       }
     }
 
-    // 降级方案：下载
+    // 降级方案
     const blob = new Blob([jsonStr], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -3098,7 +3092,7 @@ document.getElementById('exportBtn').addEventListener('click', async function() 
     a.click();
     document.body.removeChild(a);
     setTimeout(() => URL.revokeObjectURL(url), 5000);
-    showToast('✅ 导出成功！文件已保存至下载文件夹');
+    showToast('✅ 导出成功！');
 
   } catch (e) {
     console.error('导出失败:', e);
@@ -3106,7 +3100,7 @@ document.getElementById('exportBtn').addEventListener('click', async function() 
   }
 });
 
-// ==================== 导入 - 恢复所有数据 ====================
+// 导入按钮
 document.getElementById('importBtn').addEventListener('click', function() {
   document.getElementById('importInput').click();
 });
@@ -3125,8 +3119,8 @@ document.getElementById('importInput').addEventListener('change', async function
       return;
     }
 
-    let msg = '将导入以下所有数据：\n';
-    if (data.tracks) msg += `• ${data.tracks.length} 首曲目（含音频文件）\n`;
+    let msg = '将导入以下数据：\n';
+    if (data.tracks) msg += `• ${data.tracks.length} 首曲目\n`;
     if (data.categories) msg += `• ${data.categories.length} 个分类\n`;
     if (data.settings) {
       if (data.settings.bgImages && data.settings.bgImages.length > 0) msg += `• ${data.settings.bgImages.length} 张背景图片\n`;
@@ -3136,7 +3130,7 @@ document.getElementById('importInput').addEventListener('change', async function
     msg += '\n⚠️ 这将替换当前所有数据，确定继续吗？';
 
     const confirmed = await showModal({
-      title: '导入备份数据',
+      title: '导入数据',
       bodyHTML: msg.replace(/\n/g, '<br>'),
       buttons: [
         { text: '取消', value: false, style: 'cancel' },
@@ -3145,18 +3139,16 @@ document.getElementById('importInput').addEventListener('change', async function
     });
     if (!confirmed) return;
 
-    // 停止播放
     pause();
     currentMedia.src = '';
 
-    // ---- 恢复 tracks ----
+    // 恢复 tracks
     if (data.tracks && data.tracks.length > 0) {
       const newTracks = [];
       for (const t of data.tracks) {
         let src = t.src || '';
         let fileKey = null;
 
-        // 如果有 base64 数据，还原为 blob
         if (t.srcData && t.srcData.startsWith('data:')) {
           const key = 'audio-import-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
           const blob = await base64ToBlobAndStore(t.srcData, key);
@@ -3179,7 +3171,7 @@ document.getElementById('importInput').addEventListener('change', async function
       nextTrackId = tracks.length;
     }
 
-    // ---- 恢复 categories ----
+    // 恢复 categories
     if (data.categories && Array.isArray(data.categories) && data.categories.length > 0) {
       const hasDefault = data.categories.some(c => c.id === 'cat-0');
       if (!hasDefault) data.categories.unshift({ id: 'cat-0', name: '默认' });
@@ -3190,7 +3182,7 @@ document.getElementById('importInput').addEventListener('change', async function
       })) + 1;
     }
 
-    // ---- 恢复 settings（含图片） ----
+    // 恢复 settings
     if (data.settings) {
       const s = data.settings;
       if (s.bgColor) settings.bgColor = s.bgColor;
@@ -3203,7 +3195,6 @@ document.getElementById('importInput').addEventListener('change', async function
       if (s.recordOpacityImage !== undefined) settings.recordOpacityImage = s.recordOpacityImage;
       if (s.labelOpacityImage !== undefined) settings.labelOpacityImage = s.labelOpacityImage;
 
-      // 恢复图片
       async function restoreImages(imgList) {
         const result = [];
         for (const img of imgList || []) {
@@ -3232,7 +3223,7 @@ document.getElementById('importInput').addEventListener('change', async function
       else settings.labelImageIndex = settings.labelImages.length - 1;
     }
 
-    // ---- 恢复状态 ----
+    // 恢复状态
     if (data.currentCategoryId) currentCategoryId = data.currentCategoryId;
     if (data.playMode) playMode = data.playMode;
     if (data.nextTrackId) nextTrackId = data.nextTrackId;
@@ -3241,7 +3232,6 @@ document.getElementById('importInput').addEventListener('change', async function
       currentIndex = data.currentIndex;
     }
 
-    // 应用设置并刷新界面
     applySettings();
     renderCategoryBar();
     if (tracks.length > 0) {
