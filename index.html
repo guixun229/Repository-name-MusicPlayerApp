@@ -22,11 +22,527 @@
 <script src="cordova.js"></script>
 <title>音轨</title>
 <style>
-/* 所有样式保持不变，省略... 实际使用时保留完整样式 */
+/* ==================== Reset & Base ==================== */
+* { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+:root {
+  --bg-base: #0a0a0a; --bg-mid: #1a1a1a; --record-base: #030303; --record-mid: #111111;
+  --record-light: #1e1e1e; --label-color: #c0392b; --label-light: #d44336; --label-dark: #7d1f12;
+  --accent: #d4af37; --accent-dim: rgba(212,175,55,0.4); --text: #f0f0f0;
+  --text-dim: rgba(240,240,240,0.35); --edit-blue: #3a7bd5; --delete-red: #e74c3c;
+}
+html, body { height: 100%; overflow: hidden; }
+body {
+  background: var(--bg-base); color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+  overscroll-behavior: none; position: fixed; width: 100%; touch-action: manipulation;
+}
+#player-view {
+  height: 100vh; height: 100dvh; display: flex; flex-direction: column; position: relative;
+  background: radial-gradient(ellipse at 50% 45%, var(--bg-mid) 0%, var(--bg-base) 50%, #050505 100%);
+  transition: background 0.4s ease;
+}
+.top-bar {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: max(20px, env(safe-area-inset-top)) 24px 12px; z-index: 20; flex-shrink: 0;
+}
+.top-left { display: flex; align-items: center; gap: 14px; }
+.settings-icon {
+  width: 22px; height: 22px; color: var(--accent); cursor: pointer; transition: all 0.2s; flex-shrink: 0;
+}
+.settings-icon:active { opacity: 0.5; transform: scale(0.9); }
+.app-title {
+  font-size: 17px; font-weight: 700; color: var(--accent); letter-spacing: 6px;
+  text-shadow: 0 0 20px rgba(212,175,55,0.3);
+}
+.list-btn {
+  width: 0; height: 0; border-top: 9px solid transparent; border-bottom: 9px solid transparent;
+  border-left: 15px solid var(--accent); cursor: pointer; transition: all 0.2s;
+  filter: drop-shadow(0 0 8px rgba(212,175,55,0.4)); padding: 0; margin-right: 4px;
+}
+.list-btn:active { opacity: 0.5; transform: scale(0.9); }
+.record-container { flex: 1; display: flex; align-items: center; justify-content: center; position: relative; min-height: 0; padding: 10px; }
+.record-container::before {
+  content: ''; position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+  width: 360px; height: 360px; max-width: 95vw; max-height: 95vw; border-radius: 50%;
+  background: radial-gradient(circle, #151515 0%, #0c0c0c 60%, transparent 75%);
+  box-shadow: 0 0 100px rgba(0,0,0,0.6);
+}
+.record-wrap { position: relative; width: 320px; height: 320px; max-width: 82vw; max-height: 82vw; touch-action: none; }
+@media (max-width: 400px) { .record-wrap { width: 270px; height: 270px; } }
+@media (max-width: 320px) { .record-wrap { width: 230px; height: 230px; } }
+.record {
+  width: 100%; height: 100%; border-radius: 50%; position: relative; cursor: grab; will-change: transform;
+  background:
+    repeating-radial-gradient(circle at center, transparent 0, transparent 1px, rgba(255,255,255,0.028) 1px, rgba(255,255,255,0.028) 2px),
+    repeating-radial-gradient(circle at center, transparent 0, transparent 3px, rgba(0,0,0,0.35) 3px, rgba(0,0,0,0.35) 4px),
+    repeating-radial-gradient(circle at center, transparent 0, transparent 28px, rgba(0,0,0,0.55) 28px, rgba(0,0,0,0.55) 30px),
+    radial-gradient(circle at 42% 38%, var(--record-light) 0%, var(--record-mid) 45%, var(--record-base) 85%, var(--record-base) 100%);
+  box-shadow: 0 25px 70px rgba(0,0,0,0.85), 0 0 0 1px rgba(255,255,255,0.04), inset 0 0 50px rgba(0,0,0,0.7), inset 0 2px 0 rgba(255,255,255,0.03);
+  transition: background 0.4s ease;
+}
+.record::before {
+  content: ''; position: absolute; inset: -2px; border-radius: 50%;
+  background: linear-gradient(135deg, var(--record-light), var(--record-base) 40%, var(--record-base) 60%, var(--record-light) 100%);
+  z-index: -1; box-shadow: inset 0 0 0 1px rgba(0,0,0,0.5); transition: background 0.4s ease;
+}
+.record-label {
+  position: absolute; top: 50%; left: 50%; width: 36%; height: 36%; border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, var(--label-light) 0%, var(--label-color) 30%, var(--label-dark) 70%, var(--label-dark) 100%);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; transform: translate(-50%,-50%);
+  box-shadow: inset 0 2px 5px rgba(255,255,255,0.1), inset 0 -2px 5px rgba(0,0,0,0.3), 0 0 0 2px rgba(0,0,0,0.4), 0 0 0 3px rgba(255,255,255,0.05);
+  z-index: 4; transition: background 0.4s ease;
+}
+.record-label::before { content: ''; position: absolute; inset: 6px; border-radius: 50%; border: 1px solid rgba(255,255,255,0.12); }
+.record-label::after { content: ''; position: absolute; inset: 10px; border-radius: 50%; border: 1px solid rgba(255,255,255,0.06); }
+.label-text {
+  font-size: 13px; color: #f5e6d3; text-align: center; padding: 0 8px; max-width: 100%;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; letter-spacing: 1px;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.4); font-weight: 500; position: relative; z-index: 1;
+}
+.label-sub { font-size: 8px; color: rgba(255,230,210,0.5); letter-spacing: 2px; margin-top: 3px; position: relative; z-index: 1; }
+.record-hole {
+  position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+  width: 10px; height: 10px; border-radius: 50%; background: #000;
+  box-shadow: inset 0 0 3px rgba(255,255,255,0.15), 0 0 0 1px rgba(0,0,0,0.8); z-index: 6;
+}
+.record-image-overlay {
+  position: absolute; top: 0; left: 0; width: 100%; height: 100%; border-radius: 50%;
+  background-size: cover; background-position: center; display: none; z-index: 3; pointer-events: none;
+}
+.label-image-overlay {
+  position: absolute; top: 0; left: 0; width: 100%; height: 100%; border-radius: 50%;
+  background-size: cover; background-position: center; display: none; z-index: 1; pointer-events: none;
+}
+.record-gloss {
+  position: absolute; top: 0; left: 0; width: 100%; height: 100%; border-radius: 50%; pointer-events: none;
+  background: conic-gradient(from 200deg, transparent 0deg, rgba(255,255,255,0.14) 15deg, rgba(255,255,255,0.04) 45deg, transparent 90deg, transparent 250deg, rgba(255,255,255,0.06) 290deg, rgba(255,255,255,0.12) 320deg, transparent 355deg);
+  z-index: 5;
+}
+.record-gloss::before {
+  content: ''; position: absolute; inset: 0; border-radius: 50%;
+  background: linear-gradient(135deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.01) 25%, transparent 50%, rgba(255,255,255,0.02) 75%, rgba(255,255,255,0.07) 100%);
+}
+.progress-bar {
+  position: absolute; bottom: max(50px, env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%);
+  width: 70%; max-width: 320px; height: 24px; z-index: 10; display: flex; align-items: center; cursor: pointer; touch-action: none;
+}
+.progress-track { width: 100%; height: 3px; background: rgba(255,255,255,0.08); border-radius: 2px; position: relative; overflow: visible; }
+.progress-fill {
+  height: 100%; background: var(--accent); width: 0%; border-radius: 2px; transition: width 0.15s linear;
+  box-shadow: 0 0 6px var(--accent-dim); position: relative;
+}
+.progress-fill::after {
+  content: ''; position: absolute; right: -7px; top: 50%; transform: translateY(-50%);
+  width: 14px; height: 14px; border-radius: 50%; background: var(--accent);
+  box-shadow: 0 0 10px rgba(212,175,55,0.6), 0 2px 4px rgba(0,0,0,0.3); opacity: 0; transition: opacity 0.2s, transform 0.2s;
+}
+.progress-bar.dragging .progress-fill::after, .progress-bar:active .progress-fill::after { opacity: 1; transform: translateY(-50%) scale(1.3); }
+.progress-bar.dragging .progress-fill { transition: none; }
+.seek-display {
+  position: absolute; bottom: max(80px, calc(env(safe-area-inset-bottom) + 30px)); left: 50%; transform: translateX(-50%);
+  font-size: 13px; color: var(--accent); font-variant-numeric: tabular-nums; letter-spacing: 1px;
+  z-index: 10; opacity: 0; transition: opacity 0.25s; pointer-events: none; white-space: nowrap;
+}
+.seek-display.show { opacity: 1; }
+.mode-indicator {
+  position: absolute; bottom: max(20px, env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%);
+  font-size: 11px; color: var(--text-dim); z-index: 10; letter-spacing: 3px; display: flex; align-items: center; gap: 6px;
+}
+.mode-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent-dim); transition: all 0.3s; }
+.mode-dot.active { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+.toast {
+  position: fixed; bottom: 90px; left: 50%; transform: translateX(-50%) translateY(20px);
+  background: rgba(255,255,255,0.08); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+  color: var(--text); padding: 10px 28px; border-radius: 22px; font-size: 14px; opacity: 0;
+  transition: all 0.35s cubic-bezier(0.34,1.56,0.64,1); pointer-events: none; z-index: 200;
+  border: 1px solid rgba(255,255,255,0.06); white-space: nowrap;
+}
+.toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+.slide-panel {
+  position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+  background: radial-gradient(ellipse at 50% 0%, var(--bg-mid) 0%, var(--bg-base) 40%, #050505 100%);
+  z-index: 50; display: flex; flex-direction: column; transform: translateX(100%);
+  transition: transform 0.35s cubic-bezier(0.32,0.72,0,1); will-change: transform;
+}
+.slide-panel.show { transform: translateX(0); }
+.panel-header {
+  display: flex; align-items: center; padding: max(20px, env(safe-area-inset-top)) 24px 16px;
+  gap: 16px; flex-shrink: 0; border-bottom: 1px solid rgba(255,255,255,0.03);
+}
+.back-btn {
+  width: 0; height: 0; border-top: 8px solid transparent; border-bottom: 8px solid transparent;
+  border-right: 13px solid var(--accent); cursor: pointer; transition: all 0.2s;
+  filter: drop-shadow(0 0 6px rgba(212,175,55,0.3)); flex-shrink: 0;
+}
+.back-btn:active { transform: scale(0.85); }
+.panel-title { font-size: 17px; font-weight: 700; color: var(--accent); letter-spacing: 3px; }
+.category-bar {
+  display: flex; align-items: center; gap: 8px; padding: 12px 24px 8px;
+  overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch; scrollbar-width: none;
+  flex-shrink: 0; touch-action: pan-x;
+}
+.category-bar::-webkit-scrollbar { display: none; }
+.category-pill {
+  flex-shrink: 0; padding: 7px 18px; border-radius: 20px; border: 1px solid rgba(255,255,255,0.08);
+  background: rgba(255,255,255,0.03); color: var(--text-dim); font-size: 13px; white-space: nowrap;
+  cursor: pointer; transition: all 0.2s; position: relative; touch-action: manipulation;
+}
+.category-pill.active { background: rgba(212,175,55,0.12); border-color: var(--accent-dim); color: var(--accent); }
+.category-pill:active { transform: scale(0.95); }
+.category-add {
+  flex-shrink: 0; width: 36px; height: 36px; border-radius: 50%; border: 1px dashed var(--accent-dim);
+  background: transparent; color: var(--accent); font-size: 18px; display: flex; align-items: center;
+  justify-content: center; cursor: pointer; transition: all 0.2s; line-height: 1;
+}
+.category-add:active { transform: scale(0.9); background: rgba(212,175,55,0.1); }
+.list-actions { display: flex; gap: 12px; padding: 8px 24px 12px; flex-shrink: 0; }
+.action-btn {
+  flex: 1; padding: 13px 8px; border: 1px solid var(--accent-dim); border-radius: 12px;
+  background: rgba(212,175,55,0.04); color: var(--accent); font-size: 13px; font-weight: 500;
+  text-align: center; cursor: pointer; transition: all 0.2s; display: flex; align-items: center;
+  justify-content: center; gap: 6px; letter-spacing: 1px;
+}
+.action-btn:active { background: rgba(212,175,55,0.15); transform: scale(0.97); }
+.action-icon { font-size: 16px; line-height: 1; }
+.track-list-wrapper { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 4px 0; min-height: 0; position: relative; }
+.track-list { padding: 4px 0 60px; }
+.track-item { position: relative; overflow: hidden; touch-action: none; -webkit-touch-callout: none; }
+.track-actions { position: absolute; top: 0; right: 0; height: 100%; display: flex; z-index: 1; touch-action: manipulation; }
+.track-action {
+  display: flex; align-items: center; justify-content: center; width: 72px; color: #fff;
+  font-size: 13px; font-weight: 500; cursor: pointer; letter-spacing: 1px; transition: filter 0.2s; touch-action: manipulation;
+}
+.track-action:active { filter: brightness(0.85); }
+.track-action.edit { background: var(--edit-blue); }
+.track-action.delete { background: var(--delete-red); }
+.track-item-content {
+  position: relative; z-index: 2; background: var(--bg-base); display: flex; align-items: center;
+  padding: 13px 24px; transition: transform 0.3s cubic-bezier(0.32,0.72,0,1); will-change: transform;
+  border-bottom: 1px solid rgba(255,255,255,0.04); cursor: pointer; touch-action: none; -webkit-touch-callout: none;
+}
+.track-item.dragging-mode .track-actions { display: none; }
+.track-item-content.dragging {
+  transition: none; z-index: 100; box-shadow: 0 8px 30px rgba(0,0,0,0.6), 0 0 0 1px rgba(212,175,55,0.3);
+  background: #1a1a1a; opacity: 0.95; border-radius: 8px; touch-action: none;
+}
+.track-item.dragging-mode .track-item-content { border-bottom: none; }
+.track-item-content.revealed { transform: translateX(-144px); }
+.track-item-content.near-revealed { transform: translateX(-72px); }
+.track-item.active .track-item-content { color: var(--accent); }
+.track-item.active .track-number { color: var(--accent); }
+.track-number { width: 32px; text-align: center; color: var(--text-dim); font-size: 14px; flex-shrink: 0; font-variant-numeric: tabular-nums; }
+.track-info-cell { flex: 1; min-width: 0; }
+.track-name { font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-bottom: 2px; }
+.track-type { font-size: 11px; color: var(--text-dim); }
+.track-type.video { color: rgba(212,175,55,0.5); }
+.track-drag-handle { color: rgba(255,255,255,0.15); font-size: 16px; padding: 0 4px; flex-shrink: 0; touch-action: none; cursor: grab; }
+.empty-list { text-align: center; color: var(--text-dim); padding: 50px 0; font-size: 14px; }
+.empty-list .empty-icon { font-size: 48px; margin-bottom: 12px; opacity: 0.15; }
+.settings-content { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 20px 24px 60px; }
+.settings-section { margin-bottom: 32px; }
+.settings-section-title {
+  font-size: 18px; font-weight: 700; color: var(--accent); letter-spacing: 2px; margin-bottom: 20px;
+  padding-bottom: 10px; border-bottom: 1px solid rgba(212,175,55,0.15);
+  display: flex; align-items: center; justify-content: space-between; cursor: pointer; transition: opacity 0.2s;
+}
+.settings-section-title:active { opacity: 0.6; }
+.settings-section-title .arrow { font-size: 14px; transition: transform 0.3s ease; }
+.settings-section.collapsed .arrow { transform: rotate(-90deg); }
+.settings-section-body { overflow: hidden; transition: max-height 0.3s ease, opacity 0.3s ease; max-height: 2000px; opacity: 1; }
+.settings-section.collapsed .settings-section-body { max-height: 0; opacity: 0; }
+.settings-row { margin-bottom: 24px; }
+.settings-label { font-size: 14px; color: var(--text); margin-bottom: 12px; letter-spacing: 1px; }
+.color-swatches { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+.color-swatch {
+  width: 40px; height: 40px; border-radius: 50%; cursor: pointer; border: 2px solid rgba(255,255,255,0.1);
+  transition: all 0.2s; position: relative; flex-shrink: 0;
+}
+.color-swatch:active { transform: scale(0.9); }
+.color-swatch.selected { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(212,175,55,0.2); transform: scale(1.1); }
+.color-swatch.selected::after { content: '✓'; position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); color: #fff; font-size: 16px; font-weight: bold; text-shadow: 0 1px 2px rgba(0,0,0,0.5); }
+.color-custom-wrap { position: relative; width: 40px; height: 40px; flex-shrink: 0; }
+.color-custom {
+  width: 40px; height: 40px; border-radius: 50%; border: 2px dashed var(--accent-dim);
+  cursor: pointer; background: transparent; -webkit-appearance: none; appearance: none; padding: 0; overflow: hidden;
+}
+.color-custom::-webkit-color-swatch-wrapper { padding: 0; }
+.color-custom::-webkit-color-swatch { border: none; border-radius: 50%; }
+.color-custom::-moz-color-swatch { border: none; border-radius: 50%; }
+.color-custom-label { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); font-size: 18px; color: var(--accent); pointer-events: none; }
+.bg-image-grid { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 16px; }
+.bg-image-preview {
+  width: 56px; height: 56px; border-radius: 12px; border: 2px solid rgba(255,255,255,0.1);
+  background: rgba(255,255,255,0.03); background-size: cover; background-position: center;
+  flex-shrink: 0; position: relative; overflow: hidden; cursor: pointer; transition: all 0.2s;
+}
+.bg-image-preview:active { transform: scale(0.92); }
+.bg-image-preview.selected { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(212,175,55,0.2); }
+.bg-image-preview.selected .placeholder { display: none; }
+.bg-image-preview .placeholder { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); font-size: 24px; color: var(--text-dim); }
+.bg-image-preview .remove-mini {
+  position: absolute; top: 2px; right: 2px; width: 18px; height: 18px; border-radius: 50%;
+  background: rgba(231,76,60,0.85); color: #fff; font-size: 12px; display: flex; align-items: center;
+  justify-content: center; cursor: pointer; z-index: 2; line-height: 1;
+}
+.bg-image-preview .remove-mini:active { transform: scale(0.85); }
+.opacity-slider-wrap { display: flex; align-items: center; gap: 12px; }
+.opacity-slider {
+  flex: 1; -webkit-appearance: none; appearance: none; height: 4px; border-radius: 2px;
+  background: rgba(255,255,255,0.1); outline: none;
+}
+.opacity-slider::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none; width: 20px; height: 20px; border-radius: 50%;
+  background: var(--accent); cursor: pointer; box-shadow: 0 0 8px rgba(212,175,55,0.4);
+}
+.opacity-slider::-moz-range-thumb {
+  width: 20px; height: 20px; border-radius: 50%; background: var(--accent); cursor: pointer; border: none;
+  box-shadow: 0 0 8px rgba(212,175,55,0.4);
+}
+.opacity-value { font-size: 13px; color: var(--accent); font-variant-numeric: tabular-nums; min-width: 36px; text-align: right; }
+.data-btns { display: flex; gap: 12px; }
+.data-btn {
+  flex: 1; padding: 14px 8px; border: 1px solid var(--accent-dim); border-radius: 12px;
+  background: rgba(212,175,55,0.04); color: var(--accent); font-size: 14px; font-weight: 500;
+  text-align: center; cursor: pointer; transition: all 0.2s; letter-spacing: 1px;
+}
+.data-btn:active { background: rgba(212,175,55,0.15); transform: scale(0.97); }
+.list-actions.batch-mode { display: none; }
+.batch-toolbar { display: none; align-items: center; gap: 8px; padding: 8px 24px 12px; flex-shrink: 0; }
+.batch-toolbar.show { display: flex; }
+.list-actions.batch-mode + .batch-toolbar { display: flex; }
+.batch-select-all {
+  display: flex; align-items: center; gap: 8px; padding: 10px 14px; border: 1px solid var(--accent-dim);
+  border-radius: 10px; font-size: 13px; color: var(--accent); cursor: pointer; flex-shrink: 0; transition: all 0.2s; touch-action: manipulation;
+}
+.batch-select-all:active { transform: scale(0.97); }
+.batch-select-all .check-box { width: 18px; height: 18px; border: 2px solid var(--accent-dim); border-radius: 4px; display: flex; align-items: center; justify-content: center; transition: all 0.2s; flex-shrink: 0; }
+.batch-select-all.checked .check-box { background: var(--accent); border-color: var(--accent); }
+.batch-select-all.checked .check-box::after { content: '✓'; color: #0a0a0a; font-size: 12px; font-weight: bold; }
+.batch-count { flex: 1; text-align: center; font-size: 13px; color: rgba(255,255,255,0.5); font-weight: 500; }
+.batch-categorize-btn {
+  padding: 10px 16px; border: none; border-radius: 10px; background: var(--edit-blue); color: #fff;
+  font-size: 13px; font-weight: 600; cursor: pointer; flex-shrink: 0; transition: all 0.2s; touch-action: manipulation; letter-spacing: 1px;
+}
+.batch-categorize-btn:active { transform: scale(0.97); filter: brightness(0.85); }
+.batch-categorize-btn:disabled { opacity: 0.4; }
+.batch-delete-btn {
+  padding: 10px 16px; border: none; border-radius: 10px; background: var(--delete-red); color: #fff;
+  font-size: 13px; font-weight: 600; cursor: pointer; flex-shrink: 0; transition: all 0.2s; touch-action: manipulation; letter-spacing: 1px;
+}
+.batch-delete-btn:active { transform: scale(0.97); filter: brightness(0.85); }
+.batch-delete-btn:disabled { opacity: 0.4; }
+.track-item .batch-check {
+  display: none; width: 22px; height: 22px; min-width: 22px; border: 2px solid rgba(255,255,255,0.25);
+  border-radius: 5px; margin-right: 12px; align-items: center; justify-content: center; transition: all 0.2s; flex-shrink: 0;
+}
+.track-item.batch-mode .batch-check { display: flex; }
+.track-item.batch-mode .track-drag-handle { display: none; }
+.track-item.batch-mode .track-actions { display: none; }
+.track-item.batch-mode .track-item-content { touch-action: manipulation; }
+.track-item.batch-selected .batch-check { background: var(--accent); border-color: var(--accent); }
+.track-item.batch-selected .batch-check::after { content: '✓'; color: #0a0a0a; font-size: 13px; font-weight: bold; }
+.modal-overlay {
+  position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6);
+  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); z-index: 300;
+  display: flex; align-items: center; justify-content: center; opacity: 0; pointer-events: none; transition: opacity 0.25s;
+}
+.modal-overlay.show { opacity: 1; pointer-events: auto; }
+.modal {
+  width: 86%; max-width: 360px; background: linear-gradient(135deg, #1a1a1a, #121212);
+  border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; overflow: hidden;
+  transform: scale(0.9); transition: transform 0.25s cubic-bezier(0.34,1.56,0.64,1);
+}
+.modal-overlay.show .modal { transform: scale(1); }
+.modal-title { font-size: 16px; font-weight: 600; color: var(--text); text-align: center; padding: 22px 24px 8px; letter-spacing: 1px; }
+.modal-body { padding: 8px 24px 20px; text-align: center; font-size: 14px; color: var(--text-dim); line-height: 1.5; }
+.modal-input {
+  width: 100%; padding: 12px 14px; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 10px; color: var(--text); font-size: 15px; outline: none; margin-top: 8px; transition: border-color 0.2s;
+}
+.modal-input:focus { border-color: var(--accent-dim); }
+.modal-actions { display: flex; border-top: 1px solid rgba(255,255,255,0.06); }
+.modal-btn {
+  flex: 1; padding: 15px; background: transparent; border: none; font-size: 15px; font-weight: 500;
+  cursor: pointer; transition: background 0.15s; color: var(--text-dim);
+}
+.modal-btn:active { background: rgba(255,255,255,0.05); }
+.modal-btn.cancel { border-right: 1px solid rgba(255,255,255,0.06); }
+.modal-btn.confirm { color: var(--accent); font-weight: 600; }
+.modal-btn.danger { color: var(--delete-red); }
+.loading-ring {
+  position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+  width: 40px; height: 40px; border: 2px solid transparent; border-top-color: var(--accent);
+  border-radius: 50%; animation: loadingSpin 0.8s linear infinite; z-index: 10; opacity: 0; transition: opacity 0.3s;
+}
+.loading-ring.show { opacity: 1; }
+@keyframes loadingSpin { to { transform: translate(-50%,-50%) rotate(360deg); } }
+audio, video { display: none !important; }
+input[type="file"] { display: none; }
 </style>
 </head>
 <body>
-<!-- 所有HTML结构保持不变 -->
+
+<!-- Player View -->
+<div id="player-view">
+  <div class="top-bar">
+    <div class="top-left">
+      <svg class="settings-icon" id="settingsBtn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="3"/>
+        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+      </svg>
+      <span class="app-title">音轨</span>
+    </div>
+    <div class="list-btn" id="listBtn"></div>
+  </div>
+
+  <div class="record-container">
+    <div class="record-wrap" id="recordWrap">
+      <div class="record" id="record">
+        <div class="record-image-overlay" id="recordImageOverlay"></div>
+        <div class="record-label" id="recordLabel">
+          <div class="label-image-overlay" id="labelImageOverlay"></div>
+          <span class="label-text" id="labelText">音轨</span>
+          <span class="label-sub">YINGU</span>
+        </div>
+        <div class="record-hole"></div>
+      </div>
+      <div class="record-gloss"></div>
+      <div class="loading-ring" id="loadingRing"></div>
+    </div>
+  </div>
+
+  <div class="seek-display" id="seekDisplay">
+    <span id="seekCurrent">0:00</span> / <span id="seekDuration">0:00</span>
+  </div>
+
+  <div class="progress-bar" id="progressBar">
+    <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
+  </div>
+
+  <div class="mode-indicator" id="modeIndicator">
+    <span class="mode-dot" id="modeDot1"></span>
+    <span id="modeText">顺序播放</span>
+    <span class="mode-dot" id="modeDot2"></span>
+  </div>
+</div>
+
+<!-- List View -->
+<div id="list-view" class="slide-panel">
+  <div class="panel-header">
+    <div class="back-btn" id="backBtn"></div>
+    <span class="panel-title">曲目列表</span>
+  </div>
+
+  <div class="category-bar" id="categoryBar"></div>
+
+  <div class="list-actions" id="listActions">
+    <div class="action-btn" id="addAudioBtn"><span class="action-icon">+</span>添加音频</div>
+    <div class="action-btn" id="extractVideoBtn"><span class="action-icon">►</span>提取视频音频</div>
+  </div>
+
+  <div class="batch-toolbar" id="batchToolbar">
+    <div class="batch-select-all" id="batchSelectAll"><div class="check-box"></div><span>全选</span></div>
+    <span class="batch-count" id="batchCount">已选 0 项</span>
+    <button class="batch-categorize-btn" id="batchCategorizeBtn" disabled>分类</button>
+    <button class="batch-delete-btn" id="batchDeleteConfirm" disabled>删除</button>
+  </div>
+
+  <div class="track-list-wrapper" id="trackListWrapper">
+    <div class="track-list" id="trackList">
+      <div class="empty-list"><div class="empty-icon">♪</div>暂无曲目，请添加音频文件</div>
+    </div>
+  </div>
+</div>
+
+<!-- Settings View -->
+<div id="settings-view" class="slide-panel">
+  <div class="panel-header">
+    <div class="back-btn" id="settingsBackBtn"></div>
+    <span class="panel-title">设置</span>
+  </div>
+
+  <div class="settings-content">
+    <div class="settings-section collapsed" id="beautifySection">
+      <div class="settings-section-title" id="beautifyToggle"><span>美化</span><span class="arrow">▼</span></div>
+      <div class="settings-section-body" id="beautifyBody">
+        <div class="settings-row"><div class="settings-label">背景颜色</div><div class="color-swatches" id="bgSwatches"></div></div>
+        <div class="settings-row">
+          <div class="settings-label">背景透明度</div>
+          <div class="opacity-slider-wrap">
+            <input type="range" class="opacity-slider" id="bgOpacitySlider" min="0" max="100" value="100" step="5">
+            <span class="opacity-value" id="bgOpacityValue">100%</span>
+          </div>
+        </div>
+        <div class="settings-row"><div class="settings-label">唱片颜色</div><div class="color-swatches" id="recordSwatches"></div></div>
+        <div class="settings-row">
+          <div class="settings-label">唱片透明度</div>
+          <div class="opacity-slider-wrap">
+            <input type="range" class="opacity-slider" id="recordOpacitySlider" min="20" max="100" value="100" step="5">
+            <span class="opacity-value" id="recordOpacityValue">100%</span>
+          </div>
+        </div>
+        <div class="settings-row"><div class="settings-label">标签颜色</div><div class="color-swatches" id="labelSwatches"></div></div>
+        <div class="settings-row">
+          <div class="settings-label">标签透明度</div>
+          <div class="opacity-slider-wrap">
+            <input type="range" class="opacity-slider" id="labelOpacitySlider" min="20" max="100" value="100" step="5">
+            <span class="opacity-value" id="labelOpacityValue">100%</span>
+          </div>
+        </div>
+        <div class="settings-row"><div class="settings-label">自定义背景图片</div><div class="bg-image-grid" id="bgImageGrid"></div></div>
+        <div class="settings-row" id="bgOpacityRow" style="display:none;">
+          <div class="settings-label">图片透明度</div>
+          <div class="opacity-slider-wrap">
+            <input type="range" class="opacity-slider" id="opacitySlider" min="10" max="100" value="55" step="5">
+            <span class="opacity-value" id="opacityValue">55%</span>
+          </div>
+        </div>
+        <div class="settings-row"><div class="settings-label">自定义唱片图片</div><div class="bg-image-grid" id="recordImageGrid"></div></div>
+        <div class="settings-row" id="recordImgOpacityRow" style="display:none;">
+          <div class="settings-label">唱片图片透明度</div>
+          <div class="opacity-slider-wrap">
+            <input type="range" class="opacity-slider" id="recordImgOpacitySlider" min="20" max="100" value="100" step="5">
+            <span class="opacity-value" id="recordImgOpacityValue">100%</span>
+          </div>
+        </div>
+        <div class="settings-row"><div class="settings-label">自定义标签图片</div><div class="bg-image-grid" id="labelImageGrid"></div></div>
+        <div class="settings-row" id="labelImgOpacityRow" style="display:none;">
+          <div class="settings-label">标签图片透明度</div>
+          <div class="opacity-slider-wrap">
+            <input type="range" class="opacity-slider" id="labelImgOpacitySlider" min="20" max="100" value="100" step="5">
+            <span class="opacity-value" id="labelImgOpacityValue">100%</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="settings-section collapsed" id="dataSection">
+      <div class="settings-section-title" id="dataToggle"><span>数据</span><span class="arrow">▼</span></div>
+      <div class="settings-section-body">
+        <div class="data-btns">
+          <div class="data-btn" id="exportBtn">导出数据</div>
+          <div class="data-btn" id="importBtn">导入数据</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Toast & Modal -->
+<div class="toast" id="toast"></div>
+<div class="modal-overlay" id="modalOverlay">
+  <div class="modal" id="modal">
+    <div class="modal-title" id="modalTitle">提示</div>
+    <div class="modal-body" id="modalBody"></div>
+    <div class="modal-actions" id="modalActions"></div>
+  </div>
+</div>
+
+<!-- Media -->
+<audio id="audioPlayer" preload="auto" playsinline webkit-playsinline crossorigin="anonymous"></audio>
+<video id="videoPlayer" preload="auto" playsinline webkit-playsinline crossorigin="anonymous"></vid
+
 <script>
 'use strict';
 
@@ -70,9 +586,9 @@ function openDB() {
         }
       };
       req.onsuccess = e => { _db = e.target.result; resolve(_db); };
-      req.onerror = e => { console.warn('[持久化] IndexedDB 打开失败'); resolve(null); };
+      req.onerror = e => { console.warn('IndexedDB 打开失败'); resolve(null); };
     } catch(e) {
-      console.warn('[持久化] IndexedDB 不可用:', e);
+      console.warn('IndexedDB 不可用:', e);
       resolve(null);
     }
   });
@@ -189,7 +705,7 @@ function _saveToNative() {
     const jsonStr = JSON.stringify(data);
     YinguMusic.saveData(jsonStr);
   } catch(e) {
-    console.warn('[持久化] Native即时保存失败:', e);
+    console.warn('Native即时保存失败:', e);
   }
 }
 
@@ -977,1759 +1493,4 @@ function updateMediaSession() {
       const recUrl = typeof recItem === 'string' ? recItem : (recItem && recItem.url ? recItem.url : '');
       if (recUrl) artwork.unshift({ src: recUrl, sizes: '512x512', type: 'image/jpeg' });
     }
-    navigator.mediaSession.metadata = new MediaMetadata({
-      title: track.name,
-      artist: '音轨',
-      album: categories.find(c => c.id === track.categoryId)?.name || '音轨',
-      artwork: artwork.length > 0 ? artwork : [{ src: '', sizes: '512x512' }]
-    });
-    navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';
-    if ('setPositionState' in navigator.mediaSession && currentMedia && currentMedia.duration) {
-      try {
-        navigator.mediaSession.setPositionState({
-          duration: currentMedia.duration || 0,
-          position: currentMedia.currentTime || 0,
-          playbackRate: 1
-        });
-      } catch (e) {}
-    }
-  } catch (e) {}
-}
-
-// ==================== Rotation Animation ====================
-function animateRotation() {
-  rotationSpeed += (targetSpeed - rotationSpeed) * ACCEL_FACTOR;
-  rotationAngle += rotationSpeed;
-  if (rotationAngle >= 360) rotationAngle -= 360;
-  if (rotationAngle < 0) rotationAngle += 360;
-  record.style.transform = `rotate(${rotationAngle}deg)`;
-  if (isPlaying || Math.abs(rotationSpeed) > 0.05) {
-    requestAnimationFrame(animateRotation);
-  } else {
-    animating = false;
-    rotationSpeed = 0;
-  }
-}
-
-function startAnimation() {
-  if (!animating) {
-    animating = true;
-    requestAnimationFrame(animateRotation);
-  }
-}
-
-// ==================== Playback ====================
-function loadTrack(index) {
-  if (tracks.length === 0) {
-    labelText.textContent = '音轨';
-    return;
-  }
-  currentIndex = ((index % tracks.length) + tracks.length) % tracks.length;
-  const track = tracks[currentIndex];
-  const prevMedia = currentMedia;
-  if (track.type === 'video') currentMedia = videoPlayer;
-  else currentMedia = audioPlayer;
-  if (prevMedia !== currentMedia) {
-    prevMedia.pause();
-    prevMedia.currentTime = 0;
-  }
-
-  if (!track.src && track._fileKey) {
-    (async () => {
-      try {
-        const blob = _db ? await dbGet(track._fileKey) : null;
-        if (blob) {
-          track.src = URL.createObjectURL(blob);
-          currentMedia.src = track.src;
-          currentMedia.load();
-          labelText.textContent = track.name;
-          updateTrackList();
-          updateMediaSession();
-          updateProgress();
-          saveAllData();
-          showToast('已恢复音频文件');
-        } else {
-          showToast('音频文件已丢失');
-        }
-      } catch (e) {
-        showToast('加载音频失败');
-      }
-    })();
-    return;
-  }
-
-  currentMedia.src = track.src || '';
-  if (currentMedia.src) {
-    currentMedia.load();
-  } else {
-    showToast('音频文件不可用');
-  }
-  labelText.textContent = track.name;
-  updateTrackList();
-  updateMediaSession();
-  updateProgress();
-  saveAllData();
-}
-
-function play() {
-  if (tracks.length === 0) { showToast('请先添加曲目'); return; }
-  const track = tracks[currentIndex];
-  if (!track.src && track._fileKey) {
-    loadTrack(currentIndex);
-    return;
-  }
-  isPlaying = true;
-  targetSpeed = PLAY_SPEED;
-  startAnimation();
-  updateMediaSession();
-  requestWakeLock();
-  startSilentKeepAlive();
-  startKeepAliveTimer();
-  if ('mediaSession' in navigator) {
-    navigator.mediaSession.playbackState = 'playing';
-  }
-  const playPromise = currentMedia.play();
-  if (playPromise && playPromise.catch) {
-    playPromise.catch(() => { showToast('播放失败'); pause(); });
-  }
-  updateTrackList();
-}
-
-function pause() {
-  isPlaying = false;
-  targetSpeed = 0;
-  startAnimation();
-  releaseWakeLock();
-  stopKeepAliveTimer();
-  currentMedia.pause();
-  if ('mediaSession' in navigator) {
-    navigator.mediaSession.playbackState = 'paused';
-  }
-  updateTrackList();
-  updateMediaSession();
-}
-
-function togglePlay() {
-  if (isPlaying) pause(); else play();
-}
-
-function nextTrack() {
-  if (tracks.length === 0) return;
-  if (playMode === 'shuffle') {
-    let next;
-    do { next = Math.floor(Math.random() * tracks.length); }
-    while (next === currentIndex && tracks.length > 1);
-    loadTrack(next);
-  } else {
-    loadTrack(currentIndex + 1);
-  }
-  if (isPlaying) play();
-}
-
-function prevTrack() {
-  if (tracks.length === 0) return;
-  if (currentMedia.currentTime > 3) {
-    currentMedia.currentTime = 0;
-  } else {
-    loadTrack(currentIndex - 1);
-  }
-  if (isPlaying) play();
-}
-
-function onMediaEnded() {
-  if (playMode === 'shuffle') { nextTrack(); }
-  else {
-    if (currentIndex < tracks.length - 1) { loadTrack(currentIndex + 1); play(); }
-    else { pause(); loadTrack(0); }
-  }
-}
-
-function onMediaError() { showToast('无法播放此曲目'); loadingRing.classList.remove('show'); pause(); }
-function onMediaWaiting() { loadingRing.classList.add('show'); }
-function onMediaPlaying() { loadingRing.classList.remove('show'); }
-
-[audioPlayer, videoPlayer].forEach(el => {
-  el.addEventListener('ended', onMediaEnded);
-  el.addEventListener('error', onMediaError);
-  el.addEventListener('waiting', onMediaWaiting);
-  el.addEventListener('playing', onMediaPlaying);
-  el.addEventListener('canplay', () => loadingRing.classList.remove('show'));
-  el.addEventListener('timeupdate', updateProgress);
-  el.addEventListener('loadedmetadata', updateProgress);
-});
-
-// ==================== Play Mode ====================
-function togglePlayMode() {
-  if (playMode === 'sequence') {
-    playMode = 'shuffle';
-    modeText.textContent = '随机播放';
-    modeDot1.classList.add('active');
-    modeDot2.classList.add('active');
-    showToast('随机播放');
-  } else {
-    playMode = 'sequence';
-    modeText.textContent = '顺序播放';
-    modeDot1.classList.remove('active');
-    modeDot2.classList.remove('active');
-    showToast('顺序播放');
-  }
-  updateTrackList();
-  saveAllData();
-}
-
-// ==================== Record Gestures (Tap + Swipe) ====================
-let clickTimer = null;
-let touchHandled = false;
-let touchStartX = 0, touchStartY = 0, touchStartTime = 0;
-let recordGesture = 'pending';
-
-record.addEventListener('click', () => {
-  if (touchHandled) return;
-  handleTap();
-});
-
-recordWrap.addEventListener('touchstart', e => {
-  if (e.touches.length > 1) return;
-  const t = e.touches[0];
-  touchStartX = t.clientX;
-  touchStartY = t.clientY;
-  touchStartTime = Date.now();
-  recordGesture = 'pending';
-}, { passive: true });
-
-recordWrap.addEventListener('touchmove', e => {
-  if (recordGesture === 'swipe') return;
-  const t = e.touches[0];
-  const dx = t.clientX - touchStartX;
-  const dy = t.clientY - touchStartY;
-  const absDx = Math.abs(dx), absDy = Math.abs(dy);
-  if (recordGesture === 'pending') {
-    if (absDx > 50 && absDx > absDy * 1.5) {
-      recordGesture = 'swipe';
-    }
-  }
-}, { passive: true });
-
-recordWrap.addEventListener('touchend', e => {
-  touchHandled = true;
-  setTimeout(() => { touchHandled = false; }, 350);
-  const t = e.changedTouches[0];
-  const dx = t.clientX - touchStartX;
-  const dy = t.clientY - touchStartY;
-  const dt = Date.now() - touchStartTime;
-  const absDx = Math.abs(dx), absDy = Math.abs(dy);
-  if (recordGesture === 'swipe') {
-    if (dx > 0) { prevTrack(); showToast('上一曲'); }
-    else { nextTrack(); showToast('下一曲'); }
-    recordGesture = 'pending';
-    return;
-  }
-  if (absDx < 12 && absDy < 12 && dt < 300) {
-    handleTap();
-  }
-  recordGesture = 'pending';
-}, { passive: true });
-
-let mouseDownX = 0, mouseDownY = 0, mouseDown = false;
-let mouseGesture = 'pending';
-
-recordWrap.addEventListener('mousedown', e => {
-  if (touchHandled) return;
-  mouseDown = true;
-  mouseDownX = e.clientX;
-  mouseDownY = e.clientY;
-  mouseGesture = 'pending';
-});
-
-window.addEventListener('mousemove', e => {
-  if (!mouseDown) return;
-  if (mouseGesture === 'swipe') return;
-  const dx = e.clientX - mouseDownX;
-  const dy = e.clientY - mouseDownY;
-  const absDx = Math.abs(dx), absDy = Math.abs(dy);
-  if (mouseGesture === 'pending') {
-    if (absDx > 60 && absDx > absDy * 1.5) {
-      mouseGesture = 'swipe';
-    }
-  }
-});
-
-window.addEventListener('mouseup', e => {
-  if (!mouseDown) return;
-  mouseDown = false;
-  if (mouseGesture === 'swipe') {
-    const dx = e.clientX - mouseDownX;
-    if (dx > 0) { prevTrack(); showToast('上一曲'); }
-    else { nextTrack(); showToast('下一曲'); }
-    mouseGesture = 'pending';
-    return;
-  }
-  mouseGesture = 'pending';
-});
-
-function handleTap() {
-  if (clickTimer) {
-    clearTimeout(clickTimer);
-    clickTimer = null;
-    togglePlayMode();
-  } else {
-    clickTimer = setTimeout(() => {
-      if (tracks.length === 0) { showToast('请先添加曲目'); openList(); }
-      else { togglePlay(); }
-      clickTimer = null;
-    }, 220);
-  }
-}
-
-// ==================== Progress Bar Seek ====================
-let isSeeking = false;
-
-function seekToPosition(clientX) {
-  const rect = progressBar.getBoundingClientRect();
-  let percent = (clientX - rect.left) / rect.width;
-  percent = Math.max(0, Math.min(1, percent));
-  const duration = currentMedia.duration;
-  if (!duration || isNaN(duration)) return;
-  const newTime = percent * duration;
-  currentMedia.currentTime = newTime;
-  progressFill.style.width = (percent * 100) + '%';
-  seekCurrent.textContent = formatTime(newTime);
-  seekDuration.textContent = formatTime(duration);
-}
-
-function showSeekBar() {
-  const duration = currentMedia.duration;
-  seekCurrent.textContent = formatTime(currentMedia.currentTime);
-  seekDuration.textContent = formatTime(duration);
-  seekDisplay.classList.add('show');
-  progressBar.classList.add('dragging');
-}
-
-function hideSeekBar() {
-  seekDisplay.classList.remove('show');
-  progressBar.classList.remove('dragging');
-}
-
-progressBar.addEventListener('touchstart', e => {
-  e.preventDefault();
-  isSeeking = true;
-  showSeekBar();
-  const t = e.touches[0];
-  seekToPosition(t.clientX);
-}, { passive: false });
-
-progressBar.addEventListener('touchmove', e => {
-  if (!isSeeking) return;
-  e.preventDefault();
-  const t = e.touches[0];
-  seekToPosition(t.clientX);
-}, { passive: false });
-
-progressBar.addEventListener('touchend', e => {
-  if (!isSeeking) return;
-  isSeeking = false;
-  hideSeekBar();
-  updateProgress();
-}, { passive: true });
-
-progressBar.addEventListener('mousedown', e => {
-  isSeeking = true;
-  showSeekBar();
-  seekToPosition(e.clientX);
-});
-
-window.addEventListener('mousemove', e => {
-  if (!isSeeking) return;
-  seekToPosition(e.clientX);
-});
-
-window.addEventListener('mouseup', () => {
-  if (!isSeeking) return;
-  isSeeking = false;
-  hideSeekBar();
-  updateProgress();
-});
-
-// ==================== List & Settings Views ====================
-function openList() {
-  document.getElementById('list-view').classList.add('show');
-  renderCategoryBar();
-  updateTrackList();
-}
-
-function closeList() {
-  closeAllRevealedItems();
-  if (batchMode) exitBatchMode();
-  document.getElementById('list-view').classList.remove('show');
-}
-
-function openSettings() {
-  document.getElementById('settings-view').classList.add('show');
-  renderSettingsColors();
-}
-
-function closeSettings() {
-  document.getElementById('settings-view').classList.remove('show');
-}
-
-document.getElementById('listBtn').addEventListener('click', openList);
-document.getElementById('backBtn').addEventListener('click', closeList);
-document.getElementById('settingsBtn').addEventListener('click', openSettings);
-document.getElementById('settingsBackBtn').addEventListener('click', closeSettings);
-
-document.getElementById('beautifyToggle').addEventListener('click', () => {
-  const section = document.getElementById('beautifySection');
-  section.classList.toggle('collapsed');
-});
-
-document.getElementById('dataToggle').addEventListener('click', () => {
-  const section = document.getElementById('dataSection');
-  section.classList.toggle('collapsed');
-});
-
-// Background image upload
-document.getElementById('bgImageInput').addEventListener('change', async e => {
-  const files = Array.from(e.target.files);
-  if (files.length === 0) return;
-  for (const file of files) {
-    const url = URL.createObjectURL(file);
-    const fileKey = 'img-bg-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
-    try { await dbPut(fileKey, file); } catch(err) { console.warn('IndexedDB:', err); }
-    settings.bgImages.push({ url, _fileKey: fileKey });
-  }
-  settings.bgImageIndex = settings.bgImages.length - 1;
-  applySettings();
-  saveAllData();
-  showToast(`已添加 ${files.length} 张图片`);
-  e.target.value = '';
-});
-
-document.getElementById('bgOpacitySlider').addEventListener('input', e => {
-  settings.bgOpacity = parseInt(e.target.value) / 100;
-  document.getElementById('bgOpacityValue').textContent = e.target.value + '%';
-  applySettings();
-  saveAllData();
-});
-
-document.getElementById('recordOpacitySlider').addEventListener('input', e => {
-  settings.recordOpacity = parseInt(e.target.value) / 100;
-  document.getElementById('recordOpacityValue').textContent = e.target.value + '%';
-  applySettings();
-  saveAllData();
-});
-
-document.getElementById('labelOpacitySlider').addEventListener('input', e => {
-  settings.labelOpacity = parseInt(e.target.value) / 100;
-  document.getElementById('labelOpacityValue').textContent = e.target.value + '%';
-  applySettings();
-  saveAllData();
-});
-
-document.getElementById('opacitySlider').addEventListener('input', e => {
-  settings.bgOpacityImage = parseInt(e.target.value) / 100;
-  document.getElementById('opacityValue').textContent = e.target.value + '%';
-  applySettings();
-  saveAllData();
-});
-
-document.getElementById('recordImageInput').addEventListener('change', async e => {
-  const files = Array.from(e.target.files);
-  if (files.length === 0) return;
-  for (const file of files) {
-    const url = URL.createObjectURL(file);
-    const fileKey = 'img-rec-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
-    try { await dbPut(fileKey, file); } catch(err) { console.warn('IndexedDB:', err); }
-    settings.recordImages.push({ url, _fileKey: fileKey });
-  }
-  settings.recordImageIndex = settings.recordImages.length - 1;
-  applySettings();
-  saveAllData();
-  showToast(`已添加 ${files.length} 张唱片图片`);
-  e.target.value = '';
-});
-
-document.getElementById('labelImageInput').addEventListener('change', async e => {
-  const files = Array.from(e.target.files);
-  if (files.length === 0) return;
-  for (const file of files) {
-    const url = URL.createObjectURL(file);
-    const fileKey = 'img-lbl-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
-    try { await dbPut(fileKey, file); } catch(err) { console.warn('IndexedDB:', err); }
-    settings.labelImages.push({ url, _fileKey: fileKey });
-  }
-  settings.labelImageIndex = settings.labelImages.length - 1;
-  applySettings();
-  saveAllData();
-  showToast(`已添加 ${files.length} 张标签图片`);
-  e.target.value = '';
-});
-
-document.getElementById('recordImgOpacitySlider').addEventListener('input', e => {
-  settings.recordOpacityImage = parseInt(e.target.value) / 100;
-  document.getElementById('recordImgOpacityValue').textContent = e.target.value + '%';
-  applySettings();
-  saveAllData();
-});
-
-document.getElementById('labelImgOpacitySlider').addEventListener('input', e => {
-  settings.labelOpacityImage = parseInt(e.target.value) / 100;
-  document.getElementById('labelImgOpacityValue').textContent = e.target.value + '%';
-  applySettings();
-  saveAllData();
-});
-
-// ==================== 导出/导入功能（修复） ====================
-
-// 辅助函数：将 blob URL 转换为 base64
-async function blobUrlToBase64(url) {
-  try {
-    const response = await fetch(url);
-    const blob = await response.blob();
-    return new Promise((resolve) => {
-      const reader = new FileReader();
-      reader.onloadend = () => resolve(reader.result);
-      reader.readAsDataURL(blob);
-    });
-  } catch (e) {
-    console.warn('blob转base64失败:', e);
-    return null;
-  }
-}
-
-// 辅助函数：将 base64 还原为 blob 并存入 IndexedDB
-async function base64ToBlobAndStore(dataUrl, fileKey) {
-  try {
-    const response = await fetch(dataUrl);
-    const blob = await response.blob();
-    await dbPut(fileKey, blob);
-    return blob;
-  } catch (e) {
-    console.warn('base64还原失败:', e);
-    return null;
-  }
-}
-
-// 导出按钮 - 保存到手机根目录
-document.getElementById('exportBtn').addEventListener('click', async function() {
-  if (tracks.length === 0 && settings.bgImages.length === 0 && settings.recordImages.length === 0 && settings.labelImages.length === 0) {
-    showToast('暂无数据可导出');
-    return;
-  }
-
-  showToast('正在导出...');
-
-  try {
-    // 1. 处理音频
-    const exportTracks = [];
-    for (const t of tracks) {
-      const item = {
-        id: t.id,
-        name: t.name,
-        type: t.type || 'audio',
-        categoryId: t.categoryId || 'cat-0'
-      };
-      if (t.src && t.src.startsWith('blob:')) {
-        const base64 = await blobUrlToBase64(t.src);
-        if (base64) {
-          item.srcData = base64;
-        } else {
-          item.src = t.src;
-        }
-      } else if (t.src) {
-        item.src = t.src;
-      }
-      exportTracks.push(item);
-    }
-
-    // 2. 处理图片
-    async function processImagesToBase64(imgList) {
-      const result = [];
-      for (const img of imgList) {
-        let url = typeof img === 'string' ? img : (img && img.url ? img.url : '');
-        if (!url) continue;
-        if (url.startsWith('blob:')) {
-          const base64 = await blobUrlToBase64(url);
-          if (base64) {
-            result.push({ srcData: base64 });
-          }
-        } else {
-          result.push({ src: url });
-        }
-      }
-      return result;
-    }
-
-    const exportBg = await processImagesToBase64(settings.bgImages);
-    const exportRecord = await processImagesToBase64(settings.recordImages);
-    const exportLabel = await processImagesToBase64(settings.labelImages);
-
-    // 3. 组装数据
-    const exportData = {
-      app: '音轨',
-      version: '1.2.1',
-      exportDate: new Date().toISOString(),
-      tracks: exportTracks,
-      categories: categories,
-      settings: {
-        bgColor: settings.bgColor,
-        recordColor: settings.recordColor,
-        labelColor: settings.labelColor,
-        bgOpacity: settings.bgOpacity,
-        recordOpacity: settings.recordOpacity,
-        labelOpacity: settings.labelOpacity,
-        bgOpacityImage: settings.bgOpacityImage,
-        recordOpacityImage: settings.recordOpacityImage,
-        labelOpacityImage: settings.labelOpacityImage,
-        bgImageIndex: settings.bgImageIndex,
-        recordImageIndex: settings.recordImageIndex,
-        labelImageIndex: settings.labelImageIndex,
-        bgImages: exportBg,
-        recordImages: exportRecord,
-        labelImages: exportLabel
-      },
-      currentCategoryId: currentCategoryId,
-      currentIndex: currentIndex,
-      playMode: playMode,
-      nextTrackId: nextTrackId,
-      nextCategoryId: nextCategoryId
-    };
-
-    const jsonStr = JSON.stringify(exportData, null, 2);
-    const fileName = `音轨_备份_${new Date().toISOString().slice(0, 10)}.json`;
-
-    // 使用 Cordova 保存到手机存储
-    if (window.cordova && window.resolveLocalFileSystemURL) {
-      // 优先使用外部存储根目录（用户可直接看到）
-      let savePath = cordova.file.externalRootDirectory || 
-                     cordova.file.externalDataDirectory || 
-                     cordova.file.dataDirectory || 
-                     cordova.file.filesDirectory;
-      
-      // 请求权限（Android 6.0+）
-      if (window.cordova && cordova.plugins && cordova.plugins.permissions) {
-        try {
-          await new Promise((resolve, reject) => {
-            cordova.plugins.permissions.requestPermission(
-              cordova.plugins.permissions.WRITE_EXTERNAL_STORAGE,
-              function(status) {
-                if (status.hasPermission) resolve();
-                else reject(new Error('没有存储权限'));
-              },
-              function() { reject(new Error('权限请求失败')); }
-            );
-          });
-        } catch(e) {
-          console.warn('权限请求失败，尝试其他路径:', e);
-        }
-      }
-
-      try {
-        const dirEntry = await new Promise((resolve, reject) => {
-          window.resolveLocalFileSystemURL(savePath, resolve, reject);
-        });
-        const fileEntry = await new Promise((resolve, reject) => {
-          dirEntry.getFile(fileName, { create: true, exclusive: false }, resolve, reject);
-        });
-        const writer = await new Promise((resolve, reject) => {
-          fileEntry.createWriter(resolve, reject);
-        });
-        const blob = new Blob([jsonStr], { type: 'application/json' });
-        writer.write(blob);
-        await new Promise((resolve, reject) => {
-          writer.onwriteend = resolve;
-          writer.onerror = reject;
-        });
-        
-        // 显示真实路径
-        const fullPath = savePath + fileName;
-        showToast('✅ 导出成功！文件保存在: ' + fullPath);
-        console.log('导出成功，文件路径:', fullPath);
-        return;
-      } catch (e) {
-        console.warn('Cordova保存失败，使用降级方案:', e);
-      }
-    }
-
-    // 降级方案：使用 a 标签下载
-    const blob = new Blob([jsonStr], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = fileName;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    setTimeout(() => URL.revokeObjectURL(url), 5000);
-    showToast('✅ 导出成功！文件在下载文件夹');
-
-  } catch (e) {
-    console.error('导出失败:', e);
-    showToast('导出失败：' + e.message);
-  }
-});
-
-// 导入按钮
-document.getElementById('importBtn').addEventListener('click', function() {
-  document.getElementById('importInput').click();
-});
-
-document.getElementById('importInput').addEventListener('change', async function(e) {
-  const file = e.target.files[0];
-  if (!file) return;
-  e.target.value = '';
-
-  try {
-    const text = await file.text();
-    const data = JSON.parse(text);
-
-    if (!data.tracks && !data.settings && !data.categories) {
-      showToast('文件格式不正确');
-      return;
-    }
-
-    let msg = '将导入以下数据：\n';
-    if (data.tracks) msg += `• ${data.tracks.length} 首曲目\n`;
-    if (data.categories) msg += `• ${data.categories.length} 个分类\n`;
-    if (data.settings) {
-      if (data.settings.bgImages && data.settings.bgImages.length > 0) msg += `• ${data.settings.bgImages.length} 张背景图片\n`;
-      if (data.settings.recordImages && data.settings.recordImages.length > 0) msg += `• ${data.settings.recordImages.length} 张唱片图片\n`;
-      if (data.settings.labelImages && data.settings.labelImages.length > 0) msg += `• ${data.settings.labelImages.length} 张标签图片\n`;
-    }
-    msg += '\n⚠️ 这将替换当前所有数据，确定继续吗？';
-
-    const confirmed = await showModal({
-      title: '导入数据',
-      bodyHTML: msg.replace(/\n/g, '<br>'),
-      buttons: [
-        { text: '取消', value: false, style: 'cancel' },
-        { text: '导入', value: true, style: 'confirm' }
-      ]
-    });
-    if (!confirmed) return;
-
-    pause();
-    currentMedia.src = '';
-
-    // 恢复 tracks
-    if (data.tracks && data.tracks.length > 0) {
-      const newTracks = [];
-      for (const t of data.tracks) {
-        let src = t.src || '';
-        let fileKey = null;
-
-        if (t.srcData && t.srcData.startsWith('data:')) {
-          const key = 'audio-import-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
-          const blob = await base64ToBlobAndStore(t.srcData, key);
-          if (blob) {
-            src = URL.createObjectURL(blob);
-            fileKey = key;
-          }
-        }
-
-        newTracks.push({
-          id: t.id || nextTrackId++,
-          name: t.name || '未命名',
-          src: src,
-          type: t.type || 'audio',
-          categoryId: t.categoryId || 'cat-0',
-          _fileKey: fileKey
-        });
-      }
-      tracks = newTracks;
-      nextTrackId = tracks.length;
-    }
-
-    // 恢复 categories
-    if (data.categories && Array.isArray(data.categories) && data.categories.length > 0) {
-      const hasDefault = data.categories.some(c => c.id === 'cat-0');
-      if (!hasDefault) data.categories.unshift({ id: 'cat-0', name: '默认' });
-      categories = data.categories;
-      nextCategoryId = Math.max(1, ...categories.map((c) => {
-        const match = c.id && c.id.match(/cat-(\d+)/);
-        return match ? parseInt(match[1]) : 0;
-      })) + 1;
-    }
-
-    // 恢复 settings
-    if (data.settings) {
-      const s = data.settings;
-      if (s.bgColor) settings.bgColor = s.bgColor;
-      if (s.recordColor) settings.recordColor = s.recordColor;
-      if (s.labelColor) settings.labelColor = s.labelColor;
-      if (s.bgOpacity !== undefined) settings.bgOpacity = s.bgOpacity;
-      if (s.recordOpacity !== undefined) settings.recordOpacity = s.recordOpacity;
-      if (s.labelOpacity !== undefined) settings.labelOpacity = s.labelOpacity;
-      if (s.bgOpacityImage !== undefined) settings.bgOpacityImage = s.bgOpacityImage;
-      if (s.recordOpacityImage !== undefined) settings.recordOpacityImage = s.recordOpacityImage;
-      if (s.labelOpacityImage !== undefined) settings.labelOpacityImage = s.labelOpacityImage;
-
-      async function restoreImages(imgList) {
-        const result = [];
-        for (const img of imgList || []) {
-          if (img.srcData && img.srcData.startsWith('data:')) {
-            const key = 'img-import-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
-            const blob = await base64ToBlobAndStore(img.srcData, key);
-            if (blob) {
-              result.push({ url: URL.createObjectURL(blob), _fileKey: key });
-            }
-          } else if (img.src) {
-            result.push(img.src);
-          }
-        }
-        return result;
-      }
-
-      if (s.bgImages) settings.bgImages = await restoreImages(s.bgImages);
-      if (s.recordImages) settings.recordImages = await restoreImages(s.recordImages);
-      if (s.labelImages) settings.labelImages = await restoreImages(s.labelImages);
-
-      if (s.bgImageIndex !== undefined && s.bgImageIndex < settings.bgImages.length) settings.bgImageIndex = s.bgImageIndex;
-      else settings.bgImageIndex = settings.bgImages.length - 1;
-      if (s.recordImageIndex !== undefined && s.recordImageIndex < settings.recordImages.length) settings.recordImageIndex = s.recordImageIndex;
-      else settings.recordImageIndex = settings.recordImages.length - 1;
-      if (s.labelImageIndex !== undefined && s.labelImageIndex < settings.labelImages.length) settings.labelImageIndex = s.labelImageIndex;
-      else settings.labelImageIndex = settings.labelImages.length - 1;
-    }
-
-    // 恢复状态
-    if (data.currentCategoryId) currentCategoryId = data.currentCategoryId;
-    if (data.playMode) playMode = data.playMode;
-    if (data.nextTrackId) nextTrackId = data.nextTrackId;
-    if (data.nextCategoryId) nextCategoryId = data.nextCategoryId;
-    if (data.currentIndex !== undefined && data.currentIndex < tracks.length) {
-      currentIndex = data.currentIndex;
-    }
-
-    applySettings();
-    renderCategoryBar();
-    if (tracks.length > 0) {
-      loadTrack(currentIndex < tracks.length ? currentIndex : 0);
-    } else {
-      labelText.textContent = '音轨';
-    }
-    updateTrackList();
-    saveAllData();
-    showToast(`✅ 导入成功！共 ${tracks.length} 首曲目，${categories.length} 个分类`);
-
-  } catch (err) {
-    console.error('导入失败:', err);
-    showToast('导入失败：文件格式错误或数据损坏');
-  }
-});
-
-// ==================== Settings: Color Customization ====================
-function renderColorSwatches(containerId, presets, currentColor, onPick) {
-  const container = document.getElementById(containerId);
-  container.innerHTML = '';
-
-  presets.forEach(preset => {
-    const sw = document.createElement('div');
-    sw.className = 'color-swatch' + (preset.color.toLowerCase() === currentColor.toLowerCase() ? ' selected' : '');
-    sw.style.background = preset.color;
-    sw.title = preset.name;
-    sw.addEventListener('click', () => onPick(preset.color));
-    container.appendChild(sw);
-  });
-
-  const customWrap = document.createElement('div');
-  customWrap.className = 'color-custom-wrap';
-  const customInput = document.createElement('input');
-  customInput.type = 'color';
-  customInput.className = 'color-custom';
-  customInput.value = currentColor;
-  customInput.addEventListener('input', e => onPick(e.target.value));
-  customWrap.appendChild(customInput);
-  const customLabel = document.createElement('span');
-  customLabel.className = 'color-custom-label';
-  customLabel.textContent = '+';
-  customWrap.appendChild(customLabel);
-  container.appendChild(customWrap);
-}
-
-function renderSettingsColors() {
-  renderColorSwatches('bgSwatches', BG_PRESETS, settings.bgColor, color => {
-    settings.bgColor = color;
-    applySettings();
-    renderSettingsColors();
-    saveAllData();
-  });
-  renderColorSwatches('recordSwatches', RECORD_PRESETS, settings.recordColor, color => {
-    settings.recordColor = color;
-    applySettings();
-    renderSettingsColors();
-    saveAllData();
-  });
-  renderColorSwatches('labelSwatches', LABEL_PRESETS, settings.labelColor, color => {
-    settings.labelColor = color;
-    applySettings();
-    renderSettingsColors();
-    saveAllData();
-  });
-}
-
-// ==================== Category Bar ====================
-function renderCategoryBar() {
-  categoryBar.innerHTML = '';
-  categories.forEach(cat => {
-    const pill = document.createElement('div');
-    pill.className = 'category-pill' + (cat.id === currentCategoryId ? ' active' : '');
-    pill.textContent = cat.name;
-    pill.dataset.catId = cat.id;
-    attachLongPress(pill, () => showCategoryEdit(cat.id));
-    pill.addEventListener('click', () => {
-      if (pill.dataset.longPressed === '1') { pill.dataset.longPressed = '0'; return; }
-      currentCategoryId = cat.id;
-      renderCategoryBar();
-      updateTrackList();
-      saveAllData();
-    });
-    categoryBar.appendChild(pill);
-  });
-  const addBtn = document.createElement('div');
-  addBtn.className = 'category-add';
-  addBtn.textContent = '+';
-  addBtn.addEventListener('click', () => showCategoryAdd());
-  categoryBar.appendChild(addBtn);
-}
-
-async function showCategoryAdd() {
-  const name = await showModal({
-    title: '添加分类',
-    bodyHTML: '<input type="text" class="modal-input" placeholder="分类名称" maxlength="20">',
-    buttons: [
-      { text: '取消', value: null, style: 'cancel' },
-      { text: '添加', style: 'confirm', onClick: () => modalBody.querySelector('input').value.trim() }
-    ]
-  });
-  if (!name) return;
-  const newId = `cat-${nextCategoryId++}`;
-  categories.push({ id: newId, name });
-  currentCategoryId = newId;
-  renderCategoryBar();
-  updateTrackList();
-  saveAllData();
-  showToast('分类已添加');
-}
-
-async function showCategoryEdit(catId) {
-  const cat = categories.find(c => c.id === catId);
-  if (!cat) return;
-  const isDefault = catId === 'cat-0';
-  const trackCount = tracks.filter(t => t.categoryId === catId).length;
-  const name = await showModal({
-    title: '编辑分类',
-    bodyHTML: `<input type="text" class="modal-input" value="${cat.name}" maxlength="20">`,
-    buttons: [
-      { text: '取消', value: null, style: 'cancel' },
-      !isDefault ? { text: '删除', style: 'danger', onClick: () => '__DELETE__' } : null,
-      { text: '保存', style: 'confirm', onClick: () => modalBody.querySelector('input').value.trim() }
-    ].filter(Boolean)
-  });
-  if (name === '__DELETE__') {
-    const confirmed = await showModal({
-      title: '删除分类',
-      bodyHTML: `删除「${cat.name}」后，其中 ${trackCount} 首曲目将移至「默认」分类。确定删除？`,
-      buttons: [
-        { text: '取消', value: false, style: 'cancel' },
-        { text: '删除', value: true, style: 'danger' }
-      ]
-    });
-    if (!confirmed) return;
-    tracks.forEach(t => { if (t.categoryId === catId) t.categoryId = 'cat-0'; });
-    categories = categories.filter(c => c.id !== catId);
-    if (currentCategoryId === catId) currentCategoryId = 'cat-0';
-    renderCategoryBar();
-    updateTrackList();
-    saveAllData();
-    showToast('分类已删除');
-    return;
-  }
-  if (name && name !== cat.name) {
-    cat.name = name;
-    renderCategoryBar();
-    updateTrackList();
-    saveAllData();
-    showToast('分类已更新');
-  }
-}
-
-// ==================== Track List ====================
-function getFilteredTrackIndices() {
-  const result = [];
-  tracks.forEach((track, index) => {
-    if (track.categoryId === currentCategoryId) result.push(index);
-  });
-  return result;
-}
-
-function escapeHtml(str) {
-  const div = document.createElement('div');
-  div.textContent = str;
-  return div.innerHTML;
-}
-
-function updateTrackList() {
-  const filteredIndices = getFilteredTrackIndices();
-  if (filteredIndices.length === 0) {
-    trackList.innerHTML = `<div class="empty-list"><div class="empty-icon">♪</div>暂无曲目，请添加音频文件</div>`;
-    return;
-  }
-  trackList.innerHTML = filteredIndices.map((trackIdx, displayIdx) => {
-    const track = tracks[trackIdx];
-    const isActive = trackIdx === currentIndex;
-    const playing = isActive && isPlaying;
-    const typeLabel = track.type === 'video' ? '视频音频' : '音频';
-    const typeClass = track.type === 'video' ? 'video' : '';
-    const batchCls = batchMode ? 'batch-mode' : '';
-    const batchSel = batchSelected.has(trackIdx) ? 'batch-selected' : '';
-    const batchCheckHtml = '<div class="batch-check"></div>';
-    return `
-      <div class="track-item ${batchCls} ${batchSel} ${isActive ? 'active' : ''}" data-track-index="${trackIdx}" data-display-index="${displayIdx}">
-        <div class="track-actions">
-          <div class="track-action edit" data-action="edit">编辑</div>
-          <div class="track-action delete" data-action="delete">删除</div>
-        </div>
-        <div class="track-item-content">
-          ${batchMode ? batchCheckHtml : ''}
-          <span class="track-number">${playing ? '▶' : (displayIdx + 1)}</span>
-          <div class="track-info-cell">
-            <div class="track-name">${escapeHtml(track.name)}</div>
-            <div class="track-type ${typeClass}">${typeLabel}</div>
-          </div>
-          <span class="track-drag-handle">⋮⋮</span>
-        </div>
-      </div>`;
-  }).join('');
-  attachTrackItemListeners();
-  updateBatchUI();
-}
-
-function attachTrackItemListeners() {
-  trackList.querySelectorAll('.track-item').forEach(item => {
-    const content = item.querySelector('.track-item-content');
-    const editBtn = item.querySelector('.track-action.edit');
-    const deleteBtn = item.querySelector('.track-action.delete');
-
-    if (batchMode) {
-      content.addEventListener('touchend', e => {
-        e.preventDefault();
-        toggleBatchSelect(parseInt(item.dataset.trackIndex));
-      }, { passive: false });
-      content.addEventListener('click', e => {
-        e.preventDefault();
-        e.stopPropagation();
-      });
-      return;
-    }
-
-    function handleBtnTouch(btn, action) {
-      btn.addEventListener('touchstart', e => {
-        e.stopPropagation();
-      }, { passive: true });
-      btn.addEventListener('touchmove', e => {
-        e.stopPropagation();
-      }, { passive: true });
-      btn.addEventListener('touchend', e => {
-        e.preventDefault();
-        e.stopPropagation();
-        closeAllRevealedItems();
-        action(parseInt(item.dataset.trackIndex));
-      }, { passive: false });
-      btn.addEventListener('click', e => {
-        e.stopPropagation();
-      });
-    }
-    handleBtnTouch(editBtn, showTrackEdit);
-    handleBtnTouch(deleteBtn, showTrackDeleteConfirm);
-
-    attachTrackItemGestures(content, item);
-  });
-}
-
-// ==================== Track Item Gestures ====================
-function attachTrackItemGestures(content, item) {
-  let startX = 0, startY = 0, startTime = 0;
-  let deltaX = 0, deltaY = 0;
-  let lastDeltaY = 0;
-  let mode = 'pending';
-  let longPressTimer = null;
-  let itemHeight = 0;
-  let dragStartIndex = -1;
-  let allItems = [];
-  let trackIndices = [];
-  let lastTargetIndex = -1;
-  let autoScrollRAF = null;
-  let isHandleTouch = false;
-
-  content.addEventListener('touchstart', e => {
-    if (e.touches.length > 1) return;
-    const t = e.touches[0];
-    isHandleTouch = e.target.classList && e.target.classList.contains('track-drag-handle');
-    startX = t.clientX;
-    startY = t.clientY;
-    startTime = Date.now();
-    deltaX = 0;
-    deltaY = 0;
-    lastDeltaY = 0;
-    mode = 'pending';
-    itemHeight = content.offsetHeight || 60;
-    content.style.transition = 'none';
-
-    longPressTimer = setTimeout(() => {
-      if (mode === 'pending') {
-        if (isHandleTouch) {
-          mode = 'drag';
-          content.classList.add('dragging');
-          item.classList.add('dragging-mode');
-          trackList.querySelectorAll('.track-item').forEach(it => it.classList.add('dragging-mode'));
-          if (navigator.vibrate) navigator.vibrate(50);
-          allItems = Array.from(trackList.querySelectorAll('.track-item'));
-          trackIndices = getFilteredTrackIndices();
-          dragStartIndex = parseInt(item.dataset.displayIndex);
-          lastTargetIndex = dragStartIndex;
-        } else {
-          const trackIdx = parseInt(item.dataset.trackIndex);
-          if (navigator.vibrate) navigator.vibrate(50);
-          enterBatchMode(trackIdx);
-          mode = 'batch';
-        }
-      }
-    }, 400);
-  }, { passive: true });
-
-  content.addEventListener('touchmove', e => {
-    const t = e.touches[0];
-    deltaX = t.clientX - startX;
-    deltaY = t.clientY - startY;
-    const absDx = Math.abs(deltaX);
-    const absDy = Math.abs(deltaY);
-
-    if (mode === 'pending') {
-      if (absDx > 12 || absDy > 12) {
-        clearTimeout(longPressTimer);
-        longPressTimer = null;
-
-        if (absDx > absDy) {
-          mode = 'swipe';
-          trackList.querySelectorAll('.track-item-content.revealed, .track-item-content.near-revealed').forEach(el => {
-            if (el !== content) {
-              el.style.transition = '';
-              el.classList.remove('revealed');
-              el.classList.remove('near-revealed');
-              el.style.transform = '';
-            }
-          });
-        } else {
-          mode = 'scroll';
-          lastDeltaY = deltaY;
-          content.style.transition = '';
-          content.style.transform = '';
-        }
-      } else {
-        e.preventDefault();
-        return;
-      }
-    }
-
-    if (mode === 'swipe') {
-      e.preventDefault();
-      let translate = deltaX;
-      if (content.classList.contains('revealed')) translate = deltaX - 144;
-      if (translate > 0) translate = translate * 0.3;
-      if (translate < -144) translate = -144 + (translate + 144) * 0.3;
-      content.style.transform = `translateX(${translate}px)`;
-    } else if (mode === 'scroll') {
-      e.preventDefault();
-      const scrollDelta = deltaY - lastDeltaY;
-      trackListWrapper.scrollTop -= scrollDelta;
-      lastDeltaY = deltaY;
-    } else if (mode === 'drag') {
-      e.preventDefault();
-      content.style.transform = `translateY(${deltaY}px) scale(1.02)`;
-
-      const wrapperRect = trackListWrapper.getBoundingClientRect();
-      const contentRect = content.getBoundingClientRect();
-      const dragY = contentRect.top + contentRect.height / 2;
-      const edgeThreshold = 80;
-
-      if (autoScrollRAF) cancelAnimationFrame(autoScrollRAF);
-      if (dragY < wrapperRect.top + edgeThreshold) {
-        const speed = Math.min(15, (wrapperRect.top + edgeThreshold - dragY) / 5);
-        autoScrollRAF = requestAnimationFrame(function autoScroll() {
-          trackListWrapper.scrollTop -= speed;
-          autoScrollRAF = requestAnimationFrame(autoScroll);
-        });
-      } else if (dragY > wrapperRect.bottom - edgeThreshold) {
-        const speed = Math.min(15, (dragY - (wrapperRect.bottom - edgeThreshold)) / 5);
-        autoScrollRAF = requestAnimationFrame(function autoScroll() {
-          trackListWrapper.scrollTop += speed;
-          autoScrollRAF = requestAnimationFrame(autoScroll);
-        });
-      }
-
-      const targetIdx = Math.max(0, Math.min(allItems.length - 1,
-        dragStartIndex + Math.round(deltaY / itemHeight)));
-
-      if (targetIdx !== lastTargetIndex) {
-        lastTargetIndex = targetIdx;
-        allItems.forEach((otherItem, idx) => {
-          if (idx === dragStartIndex) return;
-          const otherContent = otherItem.querySelector('.track-item-content');
-          otherContent.style.transition = 'transform 0.2s ease';
-
-          if (dragStartIndex < targetIdx) {
-            if (idx > dragStartIndex && idx <= targetIdx) {
-              otherContent.style.transform = `translateY(${-itemHeight}px)`;
-            } else {
-              otherContent.style.transform = '';
-            }
-          } else if (dragStartIndex > targetIdx) {
-            if (idx >= targetIdx && idx < dragStartIndex) {
-              otherContent.style.transform = `translateY(${itemHeight}px)`;
-            } else {
-              otherContent.style.transform = '';
-            }
-          } else {
-            otherContent.style.transform = '';
-          }
-        });
-      }
-      item.dataset.targetIndex = targetIdx;
-    }
-  }, { passive: false });
-
-  content.addEventListener('touchend', e => {
-    clearTimeout(longPressTimer);
-    longPressTimer = null;
-    if (autoScrollRAF) { cancelAnimationFrame(autoScrollRAF); autoScrollRAF = null; }
-
-    const absDx = Math.abs(deltaX);
-    const absDy = Math.abs(deltaY);
-    const dt = Date.now() - startTime;
-
-    if (mode === 'swipe') {
-      content.style.transition = '';
-      let translate = deltaX;
-      if (content.classList.contains('revealed')) translate = deltaX - 144;
-      if (translate < -72) {
-        content.classList.add('revealed');
-        content.classList.remove('near-revealed');
-        content.style.transform = '';
-      } else if (translate < -36) {
-        content.classList.remove('revealed');
-        content.classList.add('near-revealed');
-        content.style.transform = '';
-      } else {
-        content.classList.remove('revealed');
-        content.classList.remove('near-revealed');
-        content.style.transform = '';
-      }
-    } else if (mode === 'drag') {
-      content.classList.remove('dragging');
-      trackList.querySelectorAll('.track-item').forEach(it => it.classList.remove('dragging-mode'));
-      content.style.transition = '';
-      content.style.transform = '';
-
-      allItems.forEach(otherItem => {
-        const otherContent = otherItem.querySelector('.track-item-content');
-        otherContent.style.transition = '';
-        otherContent.style.transform = '';
-      });
-
-      const targetIdx = parseInt(item.dataset.targetIndex || dragStartIndex);
-      if (targetIdx !== dragStartIndex && targetIdx >= 0 && targetIdx < trackIndices.length) {
-        const fromIdx = trackIndices[dragStartIndex];
-        const toIdx = trackIndices[targetIdx];
-        const movedTrack = tracks[fromIdx];
-        tracks.splice(fromIdx, 1);
-        tracks.splice(toIdx, 0, movedTrack);
-
-        if (currentIndex === fromIdx) {
-          currentIndex = toIdx;
-        } else if (fromIdx < currentIndex && toIdx >= currentIndex) {
-          currentIndex--;
-        } else if (fromIdx > currentIndex && toIdx <= currentIndex) {
-          currentIndex++;
-        }
-
-        showToast('已重新排序');
-      }
-      delete item.dataset.targetIndex;
-      updateTrackList();
-      saveAllData();
-    } else if (mode === 'batch') {
-    } else if (mode === 'scroll') {
-      content.style.transition = '';
-      content.style.transform = '';
-    } else if (mode === 'pending' && absDx < 12 && absDy < 12 && dt < 500) {
-      content.style.transition = '';
-      content.style.transform = '';
-      if (content.classList.contains('revealed') || content.classList.contains('near-revealed')) {
-        content.classList.remove('revealed');
-        content.classList.remove('near-revealed');
-      } else {
-        selectTrack(parseInt(item.dataset.trackIndex));
-      }
-    } else {
-      content.style.transition = '';
-      content.style.transform = '';
-    }
-    mode = 'pending';
-  }, { passive: true });
-
-  content.addEventListener('contextmenu', e => e.preventDefault());
-}
-
-function closeAllRevealedItems() {
-  trackList.querySelectorAll('.track-item-content.revealed, .track-item-content.near-revealed').forEach(el => {
-    el.classList.remove('revealed');
-    el.classList.remove('near-revealed');
-    el.style.transform = '';
-  });
-}
-
-// ==================== Track Edit / Delete ====================
-async function showTrackEdit(trackIdx) {
-  const track = tracks[trackIdx];
-  if (!track) return;
-  const catOptions = categories.map(c =>
-    `<option value="${c.id}" ${c.id === track.categoryId ? 'selected' : ''}>${escapeHtml(c.name)}</option>`
-  ).join('');
-  const result = await showModal({
-    title: '编辑曲目',
-    bodyHTML: `
-      <input type="text" class="modal-input" value="${escapeHtml(track.name)}" maxlength="50" style="margin-bottom: 12px;">
-      <select class="modal-input" style="appearance: auto; -webkit-appearance: none;">
-        ${catOptions}
-      </select>`,
-    buttons: [
-      { text: '取消', value: null, style: 'cancel' },
-      { text: '保存', style: 'confirm', onClick: () => {
-        const input = modalBody.querySelector('input');
-        const select = modalBody.querySelector('select');
-        return { name: input.value.trim(), catId: select.value };
-      }}
-    ]
-  });
-  if (!result) return;
-  if (result.name && result.name !== track.name) track.name = result.name;
-  if (result.catId && result.catId !== track.categoryId) {
-    track.categoryId = result.catId;
-    currentCategoryId = result.catId;
-    renderCategoryBar();
-  }
-  updateTrackList();
-  if (trackIdx === currentIndex) {
-    labelText.textContent = track.name;
-    updateMediaSession();
-  }
-  showToast('曲目已更新');
-  saveAllData();
-}
-
-async function showTrackDeleteConfirm(trackIdx) {
-  const track = tracks[trackIdx];
-  if (!track) return;
-  const confirmed = await showModal({
-    title: '删除曲目',
-    bodyHTML: `确定删除「${escapeHtml(track.name)}」吗？`,
-    buttons: [
-      { text: '取消', value: false, style: 'cancel' },
-      { text: '删除', value: true, style: 'danger' }
-    ]
-  });
-  if (!confirmed) return;
-  if (track.src.startsWith('blob:')) URL.revokeObjectURL(track.src);
-  if (track._fileKey) { dbDelete(track._fileKey).catch(()=>{}); }
-  tracks.splice(trackIdx, 1);
-  if (tracks.length === 0) {
-    pause();
-    currentMedia.src = '';
-    labelText.textContent = '音轨';
-    currentIndex = 0;
-  } else {
-    if (trackIdx === currentIndex) {
-      if (currentIndex >= tracks.length) currentIndex = 0;
-      loadTrack(currentIndex);
-      if (isPlaying) play();
-    } else if (trackIdx < currentIndex) {
-      currentIndex--;
-    }
-  }
-  updateTrackList();
-  saveAllData();
-  showToast('已删除');
-}
-
-// ==================== Batch Delete ====================
-function toggleBatchSelect(trackIdx) {
-  if (batchSelected.has(trackIdx)) {
-    batchSelected.delete(trackIdx);
-  } else {
-    batchSelected.add(trackIdx);
-  }
-  updateTrackList();
-}
-
-function updateBatchUI() {
-  const count = batchSelected.size;
-  batchCountEl.textContent = `已选 ${count} 项`;
-  batchDeleteConfirm.disabled = count === 0;
-  batchCategorizeBtn.disabled = count === 0;
-
-  const filtered = getFilteredTrackIndices();
-  const allSelected = filtered.length > 0 && filtered.every(idx => batchSelected.has(idx));
-  batchSelectAll.classList.toggle('checked', allSelected);
-}
-
-function enterBatchMode(initialTrackIdx) {
-  batchMode = true;
-  batchSelected.clear();
-  closeAllRevealedItems();
-  listActionsEl.classList.add('batch-mode');
-  batchToolbar.classList.add('show');
-  if (initialTrackIdx !== undefined && initialTrackIdx !== null) {
-    batchSelected.add(initialTrackIdx);
-  }
-  updateTrackList();
-}
-
-function exitBatchMode() {
-  batchMode = false;
-  batchSelected.clear();
-  listActionsEl.classList.remove('batch-mode');
-  batchToolbar.classList.remove('show');
-  updateTrackList();
-}
-
-batchSelectAll.addEventListener('click', () => {
-  const filtered = getFilteredTrackIndices();
-  const allSelected = filtered.every(idx => batchSelected.has(idx));
-  if (allSelected) {
-    filtered.forEach(idx => batchSelected.delete(idx));
-  } else {
-    filtered.forEach(idx => batchSelected.add(idx));
-  }
-  updateTrackList();
-});
-
-async function showBatchCategorize() {
-  const count = batchSelected.size;
-  if (count === 0) return;
-
-  const catOptions = categories.map(c => ({
-    text: c.name,
-    value: c.id
-  }));
-  catOptions.unshift({ text: '取消', value: null, style: 'cancel' });
-
-  const result = await showModal({
-    title: '移动到分类',
-    bodyHTML: `将选中的 <strong style="color:var(--accent)">${count}</strong> 首曲目移动到分类：`,
-    buttons: catOptions
-  });
-
-  if (!result) return;
-
-  batchSelected.forEach(idx => {
-    if (tracks[idx]) tracks[idx].categoryId = result;
-  });
-
-  const catName = categories.find(c => c.id === result)?.name || '';
-  exitBatchMode();
-  showToast(`已移动 ${count} 首到「${catName}」`);
-  saveAllData();
-}
-batchCategorizeBtn.addEventListener('click', showBatchCategorize);
-
-batchDeleteConfirm.addEventListener('click', async () => {
-  const count = batchSelected.size;
-  if (count === 0) return;
-
-  const confirmed = await showModal({
-    title: '批量删除',
-    bodyHTML: `确定删除选中的 <strong style="color:var(--delete-red)">${count}</strong> 首曲目吗？`,
-    buttons: [
-      { text: '取消', value: false, style: 'cancel' },
-      { text: '删除', value: true, style: 'danger' }
-    ]
-  });
-  if (!confirmed) return;
-
-  const toDelete = Array.from(batchSelected).sort((a, b) => b - a);
-  toDelete.forEach(idx => {
-    const track = tracks[idx];
-    if (track && track.src.startsWith('blob:')) URL.revokeObjectURL(track.src);
-    if (track && track._fileKey) { dbDelete(track._fileKey).catch(()=>{}); }
-    tracks.splice(idx, 1);
-  });
-
-  batchSelected.clear();
-
-  if (tracks.length === 0) {
-    pause();
-    currentMedia.src = '';
-    labelText.textContent = '音轨';
-    currentIndex = 0;
-  } else {
-    if (toDelete.includes(currentIndex) || currentIndex >= tracks.length) {
-      currentIndex = 0;
-      loadTrack(0);
-      if (isPlaying) play();
-    } else {
-      let adjust = toDelete.filter(idx => idx < currentIndex).length;
-      currentIndex -= adjust;
-    }
-  }
-
-  exitBatchMode();
-  saveAllData();
-  showToast(`已删除 ${count} 首曲目`);
-});
-
-function selectTrack(index) {
-  loadTrack(index);
-  play();
-  closeList();
-}
-
-// ==================== File Management ====================
-
-document.getElementById('addAudioBtn').addEventListener('click', function(e) {
-  audioInput.setAttribute('multiple', 'multiple');
-  audioInput.click();
-});
-
-document.getElementById('extractVideoBtn').addEventListener('click', function(e) {
-  videoInput.setAttribute('multiple', 'multiple');
-  videoInput.click();
-});
-
-audioInput.addEventListener('change', async e => {
-  const files = Array.from(e.target.files);
-  if (files.length === 0) return;
-  for (const file of files) {
-    const url = URL.createObjectURL(file);
-    const name = file.name.replace(/\.[^/.]+$/, '');
-    const fileKey = 'audio-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
-    try { await dbPut(fileKey, file); } catch(e) { console.warn('IndexedDB 存储失败:', e); }
-    tracks.push({ id: nextTrackId++, name, src: url, type: 'audio', categoryId: currentCategoryId, _fileKey: fileKey });
-  }
-  updateTrackList();
-  saveAllData();
-  showToast(`已添加 ${files.length} 首音频`);
-  e.target.value = '';
-});
-
-videoInput.addEventListener('change', async e => {
-  const files = Array.from(e.target.files);
-  if (files.length === 0) return;
-  for (const file of files) {
-    const url = URL.createObjectURL(file);
-    const name = file.name.replace(/\.[^/.]+$/, '') + ' (视频音频)';
-    const fileKey = 'video-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
-    try { await dbPut(fileKey, file); } catch(e) { console.warn('IndexedDB 存储失败:', e); }
-    tracks.push({ id: nextTrackId++, name, src: url, type: 'video', categoryId: currentCategoryId, _fileKey: fileKey });
-  }
-  updateTrackList();
-  saveAllData();
-  showToast(`已提取 ${files.length} 个视频音频`);
-  e.target.value = '';
-});
-
-// ==================== Long Press Helper ====================
-function attachLongPress(element, callback) {
-  let timer = null;
-  let startX = 0, startY = 0;
-  element.addEventListener('touchstart', e => {
-    const t = e.touches[0];
-    startX = t.clientX;
-    startY = t.clientY;
-    timer = setTimeout(() => {
-      element.dataset.longPressed = '1';
-      if (navigator.vibrate) navigator.vibrate(30);
-      callback();
-    }, 500);
-  }, { passive: true });
-  element.addEventListener('touchmove', e => {
-    const t = e.touches[0];
-    if (Math.abs(t.clientX - startX) > 10 || Math.abs(t.clientY - startY) > 10) {
-      clearTimeout(timer);
-      timer = null;
-    }
-  }, { passive: true });
-  element.addEventListener('touchend', () => { clearTimeout(timer); }, { passive: true });
-}
-
-// ==================== Keyboard Support ====================
-document.addEventListener('keydown', e => {
-  if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
-  const listViewOpen = document.getElementById('list-view').classList.contains('show');
-  const settingsOpen = document.getElementById('settings-view').classList.contains('show');
-
-  if (listViewOpen) { if (e.key === 'Escape') closeList(); return; }
-  if (settingsOpen) { if (e.key === 'Escape') closeSettings(); return; }
-
-  switch (e.key) {
-    case ' ': case 'Spacebar':
-      e.preventDefault(); togglePlay(); break;
-    case 'ArrowLeft':
-      e.preventDefault(); prevTrack(); showToast('上一曲'); break;
-    case 'ArrowRight':
-      e.preventDefault(); nextTrack(); showToast('下一曲'); break;
-  }
-});
-
-recordWrap.addEventListener('contextmenu', e => e.preventDefault());
-
-trackList.addEventListener('click', e => {
-  if (!e.target.closest('.track-item')) closeAllRevealedItems();
-}, true);
-
-trackList.addEventListener('contextmenu', e => e.preventDefault());
-
-// ==================== Init ====================
-applySettings();
-artworkUrl = generateArtwork();
-setupMediaSession();
-loadTrack(0);
-renderCategoryBar();
-updateTrackList();
-
-// ==================== App Init ====================
-function _onDeviceReady() {
-  _deviceReady = true;
-  console.log('[持久化] deviceready 已触发');
-  setupCordovaBridge();
-  (async function() {
-    try {
-      await openDB();
-      const hasData = await loadAllData();
-      if (hasData) {
-        console.log('[持久化] 已恢复历史数据');
-      }
-    } catch (e) {
-      console.warn('[持久化] 初始化失败:', e);
-    }
-    applySettings();
-    renderCategoryBar();
-    renderSettingsColors();
-    if (tracks.length > 0 && currentIndex < tracks.length) {
-      loadTrack(currentIndex);
-    } else if (tracks.length > 0) {
-      currentIndex = 0;
-      loadTrack(0);
-    }
-    updateTrackList();
-  })();
-}
-
-if (window.cordova) {
-  if (typeof cordova !== 'undefined' && cordova.fired) {
-    _onDeviceReady();
-  } else {
-    document.addEventListener('deviceready', _onDeviceReady, false);
-    setTimeout(function() {
-      if (!_deviceReady) {
-        console.warn('[持久化] deviceready 超时，强制加载');
-        _deviceReady = true;
-        (async function() {
-          try {
-            await openDB();
-              const hasData = await loadAllData();
-            if (hasData) console.log('[持久化] 超时后恢复数据');
-          } catch(e) {
-            console.warn('[持久化] 超时加载失败:', e);
-          }
-          applySettings();
-          renderCategoryBar();
-          renderSettingsColors();
-          if (tracks.length > 0 && currentIndex < tracks.length) {
-            loadTrack(currentIndex);
-          } else if (tracks.length > 0) {
-            currentIndex = 0;
-            loadTrack(0);
-          }
-          updateTrackList();
-        })();
-      }
-    }, 3000);
-  }
-} else {
-  (async function initApp() {
-    try {
-      await openDB();
-      const hasData = await loadAllData();
-      if (hasData) console.log('[持久化] 已恢复历史数据');
-    } catch (e) {
-      console.warn('[持久化] 初始化失败:', e);
-    }
-    applySettings();
-    renderCategoryBar();
-    renderSettingsColors();
-    if (tracks.length > 0 && currentIndex < tracks.length) {
-      loadTrack(currentIndex);
-    } else if (tracks.length > 0) {
-      currentIndex = 0;
-      loadTrack(0);
-    }
-    updateTrackList();
-  })();
-}
-
-// ==================== Cordova Integration ====================
-function setupCordovaBridge() {
-  if (!window.YinguMusic) return;
-
-  YinguMusic.onControl(function(action) {
-    switch (action) {
-      case 'toggle': togglePlay(); break;
-      case 'next': nextTrack(); break;
-      case 'prev': prevTrack(); break;
-      case 'play': play(); break;
-      case 'pause': pause(); break;
-    }
-  });
-
-  var _origPlay = play, _origPause = pause, _origLoad = loadTrack;
-  var serviceStarted = false;
-
-  function notifyNative() {
-    try {
-      var name = tracks[currentIndex] ? tracks[currentIndex].name : '音轨';
-      var idx = currentIndex + 1, total = tracks.length;
-
-      if (isPlaying && !serviceStarted) {
-        YinguMusic.startService();
-        serviceStarted = true;
-      }
-
-      YinguMusic.updatePlayback(isPlaying, name, idx, total);
-
-      if (!isPlaying) {
-        serviceStarted = false;
-      }
-    } catch (e) {
-      console.warn('Cordova notifyNative error:', e);
-    }
-  }
-
-  play = function() { _origPlay(); setTimeout(notifyNative, 50); };
-  pause = function() { _origPause(); setTimeout(notifyNative, 50); };
-  loadTrack = function(i) { _origLoad(i); setTimeout(notifyNative, 100); };
-
-  setTimeout(notifyNative, 500);
-}
-
-if (!window.cordova && 'serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('sw.js').then(reg => {
-      console.log('音轨 Service Worker registered');
-    }).catch(err => {
-      console.warn('SW registration failed:', err);
-    });
-  });
-}
-</script>
-</body>
-</html>
+    navigator.mediaSession.m
