@@ -1,0 +1,4622 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="音轨">
+<meta name="application-name" content="音轨">
+<meta name="theme-color" content="#0a0a0a">
+<meta name="description" content="音轨 - 极简唱片音乐播放器">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="apple-touch-icon" sizes="152x152" href="icons/apple-touch-icon-152.png">
+<link rel="apple-touch-icon" sizes="167x167" href="icons/apple-touch-icon-167.png">
+<link rel="apple-touch-icon" sizes="180x180" href="icons/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="icons/favicon-16.png">
+<link rel="shortcut icon" href="icons/favicon.ico">
+<meta name="version" content="1.2.1">
+<script src="cordova.js"></script>
+<title>音轨</title>
+<style>
+/* ==================== Reset & Base ==================== */
+* { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+:root {
+  --bg-base: #0a0a0a; --bg-mid: #1a1a1a; --record-base: #030303; --record-mid: #111111;
+  --record-light: #1e1e1e; --label-color: #c0392b; --label-light: #d44336; --label-dark: #7d1f12;
+  --accent: #d4af37; --accent-dim: rgba(212,175,55,0.4); --text: #f0f0f0;
+  --text-dim: rgba(240,240,240,0.35); --edit-blue: #3a7bd5; --delete-red: #e74c3c;
+}
+html, body { height: 100%; overflow: hidden; }
+body {
+  background: var(--bg-base); color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+  overscroll-behavior: none; position: fixed; width: 100%; touch-action: manipulation;
+}
+#player-view {
+  height: 100vh; height: 100dvh; display: flex; flex-direction: column; position: relative;
+  background: radial-gradient(ellipse at 50% 45%, var(--bg-mid) 0%, var(--bg-base) 50%, #050505 100%);
+  transition: background 0.4s ease;
+}
+.top-bar {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: max(20px, env(safe-area-inset-top)) 24px 12px; z-index: 20; flex-shrink: 0;
+}
+.top-left { display: flex; align-items: center; gap: 14px; }
+.settings-icon {
+  width: 22px; height: 22px; color: var(--accent); cursor: pointer; transition: all 0.2s; flex-shrink: 0;
+}
+.settings-icon:active { opacity: 0.5; transform: scale(0.9); }
+.app-title {
+  font-size: 17px; font-weight: 700; color: var(--accent); letter-spacing: 6px;
+  text-shadow: 0 0 20px rgba(212,175,55,0.3);
+}
+.list-btn {
+  width: 0; height: 0; border-top: 9px solid transparent; border-bottom: 9px solid transparent;
+  border-left: 15px solid var(--accent); cursor: pointer; transition: all 0.2s;
+  filter: drop-shadow(0 0 8px rgba(212,175,55,0.4)); padding: 0; margin-right: 4px;
+}
+.list-btn:active { opacity: 0.5; transform: scale(0.9); }
+.record-container { flex: 1; display: flex; align-items: center; justify-content: center; position: relative; min-height: 0; padding: 10px; }
+.record-container::before {
+  content: ''; position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+  width: 360px; height: 360px; max-width: 95vw; max-height: 95vw; border-radius: 50%;
+  background: radial-gradient(circle, #151515 0%, #0c0c0c 60%, transparent 75%);
+  box-shadow: 0 0 100px rgba(0,0,0,0.6);
+}
+.record-wrap { position: relative; width: 320px; height: 320px; max-width: 82vw; max-height: 82vw; touch-action: none; }
+@media (max-width: 400px) { .record-wrap { width: 270px; height: 270px; } }
+@media (max-width: 320px) { .record-wrap { width: 230px; height: 230px; } }
+.record {
+  width: 100%; height: 100%; border-radius: 50%; position: relative; cursor: grab; will-change: transform;
+  background:
+    repeating-radial-gradient(circle at center, transparent 0, transparent 1px, rgba(255,255,255,0.028) 1px, rgba(255,255,255,0.028) 2px),
+    repeating-radial-gradient(circle at center, transparent 0, transparent 3px, rgba(0,0,0,0.35) 3px, rgba(0,0,0,0.35) 4px),
+    repeating-radial-gradient(circle at center, transparent 0, transparent 28px, rgba(0,0,0,0.55) 28px, rgba(0,0,0,0.55) 30px),
+    radial-gradient(circle at 42% 38%, var(--record-light) 0%, var(--record-mid) 45%, var(--record-base) 85%, var(--record-base) 100%);
+  box-shadow: 0 25px 70px rgba(0,0,0,0.85), 0 0 0 1px rgba(255,255,255,0.04), inset 0 0 50px rgba(0,0,0,0.7), inset 0 2px 0 rgba(255,255,255,0.03);
+  transition: background 0.4s ease;
+}
+.record::before {
+  content: ''; position: absolute; inset: -2px; border-radius: 50%;
+  background: linear-gradient(135deg, var(--record-light), var(--record-base) 40%, var(--record-base) 60%, var(--record-light) 100%);
+  z-index: -1; box-shadow: inset 0 0 0 1px rgba(0,0,0,0.5); transition: background 0.4s ease;
+}
+.record-label {
+  position: absolute; top: 50%; left: 50%; width: 36%; height: 36%; border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, var(--label-light) 0%, var(--label-color) 30%, var(--label-dark) 70%, var(--label-dark) 100%);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; transform: translate(-50%,-50%);
+  box-shadow: inset 0 2px 5px rgba(255,255,255,0.1), inset 0 -2px 5px rgba(0,0,0,0.3), 0 0 0 2px rgba(0,0,0,0.4), 0 0 0 3px rgba(255,255,255,0.05);
+  z-index: 4; transition: background 0.4s ease;
+}
+.record-label::before { content: ''; position: absolute; inset: 6px; border-radius: 50%; border: 1px solid rgba(255,255,255,0.12); }
+.record-label::after { content: ''; position: absolute; inset: 10px; border-radius: 50%; border: 1px solid rgba(255,255,255,0.06); }
+.label-text {
+  font-size: 13px; color: #f5e6d3; text-align: center; padding: 0 8px; max-width: 100%;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; letter-spacing: 1px;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.4); font-weight: 500; position: relative; z-index: 1;
+}
+.label-sub { font-size: 8px; color: rgba(255,230,210,0.5); letter-spacing: 2px; margin-top: 3px; position: relative; z-index: 1; }
+.record-hole {
+  position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+  width: 10px; height: 10px; border-radius: 50%; background: #000;
+  box-shadow: inset 0 0 3px rgba(255,255,255,0.15), 0 0 0 1px rgba(0,0,0,0.8); z-index: 6;
+}
+.record-image-overlay {
+  position: absolute; top: 0; left: 0; width: 100%; height: 100%; border-radius: 50%;
+  background-size: cover; background-position: center; display: none; z-index: 3; pointer-events: none;
+}
+.label-image-overlay {
+  position: absolute; top: 0; left: 0; width: 100%; height: 100%; border-radius: 50%;
+  background-size: cover; background-position: center; display: none; z-index: 1; pointer-events: none;
+}
+.record-gloss {
+  position: absolute; top: 0; left: 0; width: 100%; height: 100%; border-radius: 50%; pointer-events: none;
+  background: conic-gradient(from 200deg, transparent 0deg, rgba(255,255,255,0.14) 15deg, rgba(255,255,255,0.04) 45deg, transparent 90deg, transparent 250deg, rgba(255,255,255,0.06) 290deg, rgba(255,255,255,0.12) 320deg, transparent 355deg);
+  z-index: 5;
+}
+.record-gloss::before {
+  content: ''; position: absolute; inset: 0; border-radius: 50%;
+  background: linear-gradient(135deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.01) 25%, transparent 50%, rgba(255,255,255,0.02) 75%, rgba(255,255,255,0.07) 100%);
+}
+.progress-bar {
+  position: absolute; bottom: max(50px, env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%);
+  width: 70%; max-width: 320px; height: 24px; z-index: 10; display: flex; align-items: center; cursor: pointer; touch-action: none;
+}
+.progress-track { width: 100%; height: 3px; background: rgba(255,255,255,0.08); border-radius: 2px; position: relative; overflow: visible; }
+.progress-fill {
+  height: 100%; background: var(--accent); width: 0%; border-radius: 2px; transition: width 0.15s linear;
+  box-shadow: 0 0 6px var(--accent-dim); position: relative;
+}
+.progress-fill::after {
+  content: ''; position: absolute; right: -7px; top: 50%; transform: translateY(-50%);
+  width: 14px; height: 14px; border-radius: 50%; background: var(--accent);
+  box-shadow: 0 0 10px rgba(212,175,55,0.6), 0 2px 4px rgba(0,0,0,0.3); opacity: 0; transition: opacity 0.2s, transform 0.2s;
+}
+.progress-bar.dragging .progress-fill::after, .progress-bar:active .progress-fill::after { opacity: 1; transform: translateY(-50%) scale(1.3); }
+.progress-bar.dragging .progress-fill { transition: none; }
+.seek-display {
+  position: absolute; bottom: max(80px, calc(env(safe-area-inset-bottom) + 30px)); left: 50%; transform: translateX(-50%);
+  font-size: 13px; color: var(--accent); font-variant-numeric: tabular-nums; letter-spacing: 1px;
+  z-index: 10; opacity: 0; transition: opacity 0.25s; pointer-events: none; white-space: nowrap;
+}
+.seek-display.show { opacity: 1; }
+.mode-indicator {
+  position: absolute; bottom: max(20px, env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%);
+  font-size: 11px; color: var(--text-dim); z-index: 10; letter-spacing: 3px; display: flex; align-items: center; gap: 6px;
+}
+.mode-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent-dim); transition: all 0.3s; }
+.mode-dot.active { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+.toast {
+  position: fixed; bottom: 90px; left: 50%; transform: translateX(-50%) translateY(20px);
+  background: rgba(255,255,255,0.08); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+  color: var(--text); padding: 10px 28px; border-radius: 22px; font-size: 14px; opacity: 0;
+  transition: all 0.35s cubic-bezier(0.34,1.56,0.64,1); pointer-events: none; z-index: 200;
+  border: 1px solid rgba(255,255,255,0.06); white-space: nowrap;
+}
+.toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+.slide-panel {
+  position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+  background: radial-gradient(ellipse at 50% 0%, var(--bg-mid) 0%, var(--bg-base) 40%, #050505 100%);
+  z-index: 50; display: flex; flex-direction: column; transform: translateX(100%);
+  transition: transform 0.35s cubic-bezier(0.32,0.72,0,1); will-change: transform;
+}
+.slide-panel.show { transform: translateX(0); }
+.panel-header {
+  display: flex; align-items: center; padding: max(20px, env(safe-area-inset-top)) 24px 16px;
+  gap: 16px; flex-shrink: 0; border-bottom: 1px solid rgba(255,255,255,0.03);
+}
+.back-btn {
+  width: 0; height: 0; border-top: 8px solid transparent; border-bottom: 8px solid transparent;
+  border-right: 13px solid var(--accent); cursor: pointer; transition: all 0.2s;
+  filter: drop-shadow(0 0 6px rgba(212,175,55,0.3)); flex-shrink: 0;
+}
+.back-btn:active { transform: scale(0.85); }
+.panel-title { font-size: 17px; font-weight: 700; color: var(--accent); letter-spacing: 3px; }
+.category-bar {
+  display: flex; align-items: center; gap: 8px; padding: 12px 24px 8px;
+  overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch; scrollbar-width: none;
+  flex-shrink: 0; touch-action: pan-x;
+}
+.category-bar::-webkit-scrollbar { display: none; }
+.category-pill {
+  flex-shrink: 0; padding: 7px 18px; border-radius: 20px; border: 1px solid rgba(255,255,255,0.08);
+  background: rgba(255,255,255,0.03); color: var(--text-dim); font-size: 13px; white-space: nowrap;
+  cursor: pointer; transition: all 0.2s; position: relative; touch-action: manipulation;
+}
+.category-pill.active { background: rgba(212,175,55,0.12); border-color: var(--accent-dim); color: var(--accent); }
+.category-pill:active { transform: scale(0.95); }
+.category-add {
+  flex-shrink: 0; width: 36px; height: 36px; border-radius: 50%; border: 1px dashed var(--accent-dim);
+  background: transparent; color: var(--accent); font-size: 18px; display: flex; align-items: center;
+  justify-content: center; cursor: pointer; transition: all 0.2s; line-height: 1;
+}
+.category-add:active { transform: scale(0.9); background: rgba(212,175,55,0.1); }
+.list-actions { display: flex; gap: 12px; padding: 8px 24px 12px; flex-shrink: 0; }
+.action-btn {
+  flex: 1; padding: 13px 8px; border: 1px solid var(--accent-dim); border-radius: 12px;
+  background: rgba(212,175,55,0.04); color: var(--accent); font-size: 13px; font-weight: 500;
+  text-align: center; cursor: pointer; transition: all 0.2s; display: flex; align-items: center;
+  justify-content: center; gap: 6px; letter-spacing: 1px;
+}
+.action-btn:active { background: rgba(212,175,55,0.15); transform: scale(0.97); }
+.action-icon { font-size: 16px; line-height: 1; }
+.track-list-wrapper { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 4px 0; min-height: 0; position: relative; }
+.track-list { padding: 4px 0 60px; }
+.track-item { position: relative; overflow: hidden; touch-action: none; -webkit-touch-callout: none; }
+.track-actions { position: absolute; top: 0; right: 0; height: 100%; display: flex; z-index: 1; touch-action: manipulation; }
+.track-action {
+  display: flex; align-items: center; justify-content: center; width: 72px; color: #fff;
+  font-size: 13px; font-weight: 500; cursor: pointer; letter-spacing: 1px; transition: filter 0.2s; touch-action: manipulation;
+}
+.track-action:active { filter: brightness(0.85); }
+.track-action.edit { background: var(--edit-blue); }
+.track-action.delete { background: var(--delete-red); }
+.track-item-content {
+  position: relative; z-index: 2; background: var(--bg-base); display: flex; align-items: center;
+  padding: 13px 24px; transition: transform 0.3s cubic-bezier(0.32,0.72,0,1); will-change: transform;
+  border-bottom: 1px solid rgba(255,255,255,0.04); cursor: pointer; touch-action: none; -webkit-touch-callout: none;
+}
+.track-item.dragging-mode .track-actions { display: none; }
+.track-item-content.dragging {
+  transition: none; z-index: 100; box-shadow: 0 8px 30px rgba(0,0,0,0.6), 0 0 0 1px rgba(212,175,55,0.3);
+  background: #1a1a1a; opacity: 0.95; border-radius: 8px; touch-action: none;
+}
+.track-item.dragging-mode .track-item-content { border-bottom: none; }
+.track-item-content.revealed { transform: translateX(-144px); }
+.track-item-content.near-revealed { transform: translateX(-72px); }
+.track-item.active .track-item-content { color: var(--accent); }
+.track-item.active .track-number { color: var(--accent); }
+.track-number { width: 32px; text-align: center; color: var(--text-dim); font-size: 14px; flex-shrink: 0; font-variant-numeric: tabular-nums; }
+.track-info-cell { flex: 1; min-width: 0; }
+.track-name { font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-bottom: 2px; }
+.track-type { font-size: 11px; color: var(--text-dim); }
+.track-type.video { color: rgba(212,175,55,0.5); }
+.track-drag-handle { color: rgba(255,255,255,0.15); font-size: 16px; padding: 0 4px; flex-shrink: 0; touch-action: none; cursor: grab; }
+.empty-list { text-align: center; color: var(--text-dim); padding: 50px 0; font-size: 14px; }
+.empty-list .empty-icon { font-size: 48px; margin-bottom: 12px; opacity: 0.15; }
+.settings-content { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 20px 24px 60px; }
+.settings-section { margin-bottom: 32px; }
+.settings-section-title {
+  font-size: 18px; font-weight: 700; color: var(--accent); letter-spacing: 2px; margin-bottom: 20px;
+  padding-bottom: 10px; border-bottom: 1px solid rgba(212,175,55,0.15);
+  display: flex; align-items: center; justify-content: space-between; cursor: pointer; transition: opacity 0.2s;
+}
+.settings-section-title:active { opacity: 0.6; }
+.settings-section-title .arrow { font-size: 14px; transition: transform 0.3s ease; }
+.settings-section.collapsed .arrow { transform: rotate(-90deg); }
+.settings-section-body { overflow: hidden; transition: max-height 0.3s ease, opacity 0.3s ease; max-height: 2000px; opacity: 1; }
+.settings-section.collapsed .settings-section-body { max-height: 0; opacity: 0; }
+.settings-row { margin-bottom: 24px; }
+.settings-label { font-size: 14px; color: var(--text); margin-bottom: 12px; letter-spacing: 1px; }
+.color-swatches { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+.color-swatch {
+  width: 40px; height: 40px; border-radius: 50%; cursor: pointer; border: 2px solid rgba(255,255,255,0.1);
+  transition: all 0.2s; position: relative; flex-shrink: 0;
+}
+.color-swatch:active { transform: scale(0.9); }
+.color-swatch.selected { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(212,175,55,0.2); transform: scale(1.1); }
+.color-swatch.selected::after { content: '✓'; position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); color: #fff; font-size: 16px; font-weight: bold; text-shadow: 0 1px 2px rgba(0,0,0,0.5); }
+.color-custom-wrap { position: relative; width: 40px; height: 40px; flex-shrink: 0; }
+.color-custom {
+  width: 40px; height: 40px; border-radius: 50%; border: 2px dashed var(--accent-dim);
+  cursor: pointer; background: transparent; -webkit-appearance: none; appearance: none; padding: 0; overflow: hidden;
+}
+.color-custom::-webkit-color-swatch-wrapper { padding: 0; }
+.color-custom::-webkit-color-swatch { border: none; border-radius: 50%; }
+.color-custom::-moz-color-swatch { border: none; border-radius: 50%; }
+.color-custom-label { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); font-size: 18px; color: var(--accent); pointer-events: none; }
+.bg-image-grid { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 16px; }
+.bg-image-preview {
+  width: 56px; height: 56px; border-radius: 12px; border: 2px solid rgba(255,255,255,0.1);
+  background: rgba(255,255,255,0.03); background-size: cover; background-position: center;
+  flex-shrink: 0; position: relative; overflow: hidden; cursor: pointer; transition: all 0.2s;
+}
+.bg-image-preview:active { transform: scale(0.92); }
+.bg-image-preview.selected { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(212,175,55,0.2); }
+.bg-image-preview.selected .placeholder { display: none; }
+.bg-image-preview .placeholder { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); font-size: 24px; color: var(--text-dim); }
+.bg-image-preview .remove-mini {
+  position: absolute; top: 2px; right: 2px; width: 18px; height: 18px; border-radius: 50%;
+  background: rgba(231,76,60,0.85); color: #fff; font-size: 12px; display: flex; align-items: center;
+  justify-content: center; cursor: pointer; z-index: 2; line-height: 1;
+}
+.bg-image-preview .remove-mini:active { transform: scale(0.85); }
+.opacity-slider-wrap { display: flex; align-items: center; gap: 12px; }
+.opacity-slider {
+  flex: 1; -webkit-appearance: none; appearance: none; height: 4px; border-radius: 2px;
+  background: rgba(255,255,255,0.1); outline: none;
+}
+.opacity-slider::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none; width: 20px; height: 20px; border-radius: 50%;
+  background: var(--accent); cursor: pointer; box-shadow: 0 0 8px rgba(212,175,55,0.4);
+}
+.opacity-slider::-moz-range-thumb {
+  width: 20px; height: 20px; border-radius: 50%; background: var(--accent); cursor: pointer; border: none;
+  box-shadow: 0 0 8px rgba(212,175,55,0.4);
+}
+.opacity-value { font-size: 13px; color: var(--accent); font-variant-numeric: tabular-nums; min-width: 36px; text-align: right; }
+.data-btns { display: flex; gap: 12px; }
+.data-btn {
+  flex: 1; padding: 14px 8px; border: 1px solid var(--accent-dim); border-radius: 12px;
+  background: rgba(212,175,55,0.04); color: var(--accent); font-size: 14px; font-weight: 500;
+  text-align: center; cursor: pointer; transition: all 0.2s; letter-spacing: 1px;
+}
+.data-btn:active { background: rgba(212,175,55,0.15); transform: scale(0.97); }
+.list-actions.batch-mode { display: none; }
+.batch-toolbar { display: none; align-items: center; gap: 8px; padding: 8px 24px 12px; flex-shrink: 0; }
+.batch-toolbar.show { display: flex; }
+.list-actions.batch-mode + .batch-toolbar { display: flex; }
+.batch-select-all {
+  display: flex; align-items: center; gap: 8px; padding: 10px 14px; border: 1px solid var(--accent-dim);
+  border-radius: 10px; font-size: 13px; color: var(--accent); cursor: pointer; flex-shrink: 0; transition: all 0.2s; touch-action: manipulation;
+}
+.batch-select-all:active { transform: scale(0.97); }
+.batch-select-all .check-box { width: 18px; height: 18px; border: 2px solid var(--accent-dim); border-radius: 4px; display: flex; align-items: center; justify-content: center; transition: all 0.2s; flex-shrink: 0; }
+.batch-select-all.checked .check-box { background: var(--accent); border-color: var(--accent); }
+.batch-select-all.checked .check-box::after { content: '✓'; color: #0a0a0a; font-size: 12px; font-weight: bold; }
+.batch-count { flex: 1; text-align: center; font-size: 13px; color: rgba(255,255,255,0.5); font-weight: 500; }
+.batch-categorize-btn {
+  padding: 10px 16px; border: none; border-radius: 10px; background: var(--edit-blue); color: #fff;
+  font-size: 13px; font-weight: 600; cursor: pointer; flex-shrink: 0; transition: all 0.2s; touch-action: manipulation; letter-spacing: 1px;
+}
+.batch-categorize-btn:active { transform: scale(0.97); filter: brightness(0.85); }
+.batch-categorize-btn:disabled { opacity: 0.4; }
+.batch-delete-btn {
+  padding: 10px 16px; border: none; border-radius: 10px; background: var(--delete-red); color: #fff;
+  font-size: 13px; font-weight: 600; cursor: pointer; flex-shrink: 0; transition: all 0.2s; touch-action: manipulation; letter-spacing: 1px;
+}
+.batch-delete-btn:active { transform: scale(0.97); filter: brightness(0.85); }
+.batch-delete-btn:disabled { opacity: 0.4; }
+.track-item .batch-check {
+  display: none; width: 22px; height: 22px; min-width: 22px; border: 2px solid rgba(255,255,255,0.25);
+  border-radius: 5px; margin-right: 12px; align-items: center; justify-content: center; transition: all 0.2s; flex-shrink: 0;
+}
+.track-item.batch-mode .batch-check { display: flex; }
+.track-item.batch-mode .track-drag-handle { display: none; }
+.track-item.batch-mode .track-actions { display: none; }
+.track-item.batch-mode .track-item-content { touch-action: manipulation; }
+.track-item.batch-selected .batch-check { background: var(--accent); border-color: var(--accent); }
+.track-item.batch-selected .batch-check::after { content: '✓'; color: #0a0a0a; font-size: 13px; font-weight: bold; }
+.modal-overlay {
+  position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6);
+  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); z-index: 300;
+  display: flex; align-items: center; justify-content: center; opacity: 0; pointer-events: none; transition: opacity 0.25s;
+}
+.modal-overlay.show { opacity: 1; pointer-events: auto; }
+.modal {
+  width: 86%; max-width: 360px; background: linear-gradient(135deg, #1a1a1a, #121212);
+  border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; overflow: hidden;
+  transform: scale(0.9); transition: transform 0.25s cubic-bezier(0.34,1.56,0.64,1);
+}
+.modal-overlay.show .modal { transform: scale(1); }
+.modal-title { font-size: 16px; font-weight: 600; color: var(--text); text-align: center; padding: 22px 24px 8px; letter-spacing: 1px; }
+.modal-body { padding: 8px 24px 20px; text-align: center; font-size: 14px; color: var(--text-dim); line-height: 1.5; }
+.modal-input {
+  width: 100%; padding: 12px 14px; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 10px; color: var(--text); font-size: 15px; outline: none; margin-top: 8px; transition: border-color 0.2s;
+}
+.modal-input:focus { border-color: var(--accent-dim); }
+.modal-actions { display: flex; border-top: 1px solid rgba(255,255,255,0.06); }
+.modal-btn {
+  flex: 1; padding: 15px; background: transparent; border: none; font-size: 15px; font-weight: 500;
+  cursor: pointer; transition: background 0.15s; color: var(--text-dim);
+}
+.modal-btn:active { background: rgba(255,255,255,0.05); }
+.modal-btn.cancel { border-right: 1px solid rgba(255,255,255,0.06); }
+.modal-btn.confirm { color: var(--accent); font-weight: 600; }
+.modal-btn.danger { color: var(--delete-red); }
+.loading-ring {
+  position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+  width: 40px; height: 40px; border: 2px solid transparent; border-top-color: var(--accent);
+  border-radius: 50%; animation: loadingSpin 0.8s linear infinite; z-index: 10; opacity: 0; transition: opacity 0.3s;
+}
+.loading-ring.show { opacity: 1; }
+@keyframes loadingSpin { to { transform: translate(-50%,-50%) rotate(360deg); } }
+audio, video { display: none !important; }
+input[type="file"] { display: none; }
+
+/* ==================== Auth Screen (Login/Register) ==================== */
+.auth-screen {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: radial-gradient(ellipse at 50% 30%, #1a1a1a 0%, #0a0a0a 60%, #050505 100%);
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 32px;
+  transition: opacity 0.4s ease, transform 0.4s ease;
+}
+.auth-screen.hidden {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-20px);
+}
+.auth-logo {
+  width: 100px;
+  height: 100px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #d44336 0%, #c0392b 40%, #7d1f12 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 16px;
+  box-shadow: 0 0 40px rgba(192,57,43,0.3), inset 0 2px 5px rgba(255,255,255,0.1);
+  position: relative;
+}
+.auth-logo::after {
+  content: '';
+  position: absolute;
+  width: 12px; height: 12px;
+  border-radius: 50%;
+  background: #000;
+  box-shadow: inset 0 0 3px rgba(255,255,255,0.15);
+}
+.auth-logo-text {
+  position: absolute;
+  color: #f5e6d3;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 4px;
+  margin-top: 120px;
+  text-shadow: 0 0 20px rgba(212,175,55,0.3);
+}
+.auth-subtitle {
+  color: rgba(240,240,240,0.4);
+  font-size: 13px;
+  margin-top: 8px;
+  margin-bottom: 40px;
+  letter-spacing: 2px;
+}
+.auth-tabs {
+  display: flex;
+  gap: 0;
+  margin-bottom: 28px;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+  width: 100%;
+  max-width: 340px;
+}
+.auth-tab {
+  flex: 1;
+  padding: 12px 0;
+  text-align: center;
+  font-size: 15px;
+  color: rgba(240,240,240,0.4);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: all 0.2s;
+  letter-spacing: 1px;
+}
+.auth-tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+.auth-form {
+  width: 100%;
+  max-width: 340px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.auth-input-group {
+  position: relative;
+}
+.auth-input {
+  width: 100%;
+  padding: 14px 16px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 12px;
+  color: var(--text);
+  font-size: 15px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+.auth-input:focus {
+  border-color: var(--accent-dim);
+}
+.auth-input::placeholder {
+  color: rgba(240,240,240,0.3);
+}
+.auth-input.code-input {
+  padding-right: 110px;
+}
+.auth-code-btn {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  padding: 8px 14px;
+  background: rgba(212,175,55,0.12);
+  border: 1px solid var(--accent-dim);
+  border-radius: 8px;
+  color: var(--accent);
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.auth-code-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.auth-type-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.auth-type-btn {
+  flex: 1;
+  padding: 10px;
+  text-align: center;
+  font-size: 13px;
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 10px;
+  color: rgba(240,240,240,0.5);
+  cursor: pointer;
+  transition: all 0.2s;
+  background: transparent;
+}
+.auth-type-btn.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: rgba(212,175,55,0.08);
+}
+.auth-submit-btn {
+  width: 100%;
+  padding: 15px;
+  margin-top: 8px;
+  background: linear-gradient(135deg, var(--accent), #b8941f);
+  border: none;
+  border-radius: 12px;
+  color: #0a0a0a;
+  font-size: 16px;
+  font-weight: 700;
+  cursor: pointer;
+  letter-spacing: 2px;
+  transition: all 0.2s;
+}
+.auth-submit-btn:active {
+  transform: scale(0.97);
+  opacity: 0.9;
+}
+.auth-forgot {
+  text-align: center;
+  color: rgba(240,240,240,0.4);
+  font-size: 13px;
+  margin-top: 4px;
+  cursor: pointer;
+}
+.auth-forgot:active {
+  color: var(--accent);
+}
+.auth-error {
+  color: var(--delete-red);
+  font-size: 13px;
+  text-align: center;
+  min-height: 20px;
+}
+.auth-guest {
+  text-align: center;
+  color: rgba(240,240,240,0.25);
+  font-size: 12px;
+  margin-top: 20px;
+  cursor: pointer;
+  letter-spacing: 1px;
+}
+.auth-guest:active { color: rgba(240,240,240,0.5); }
+
+/* ==================== Account Section in Settings ==================== */
+.account-info {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px;
+  background: rgba(255,255,255,0.03);
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,0.06);
+  margin-bottom: 16px;
+}
+.account-avatar {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--accent), #b8941f);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  color: #0a0a0a;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.account-details { flex: 1; min-width: 0; }
+.account-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 2px;
+}
+.account-type-label {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.account-logout-btn {
+  padding: 8px 16px;
+  border: 1px solid rgba(231,76,60,0.4);
+  border-radius: 8px;
+  background: rgba(231,76,60,0.08);
+  color: var(--delete-red);
+  font-size: 13px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.account-logout-btn:active { opacity: 0.7; }
+.account-sync-status {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.sync-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #27ae60;
+}
+
+/* ==================== Multi-select Export Modal ==================== */
+.export-section-title {
+  font-size: 14px;
+  color: var(--accent);
+  margin: 12px 0 8px;
+  font-weight: 600;
+}
+.export-track-list {
+  max-height: 240px;
+  overflow-y: auto;
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 10px;
+  margin-bottom: 8px;
+}
+.export-track-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  cursor: pointer;
+}
+.export-track-item:last-child { border-bottom: none; }
+.export-track-check {
+  width: 20px;
+  height: 20px;
+  border: 2px solid rgba(255,255,255,0.2);
+  border-radius: 5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: all 0.15s;
+}
+.export-track-item.checked .export-track-check {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.export-track-item.checked .export-track-check::after {
+  content: '✓';
+  color: #0a0a0a;
+  font-size: 13px;
+  font-weight: bold;
+}
+.export-track-name {
+  flex: 1;
+  font-size: 14px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.export-track-item.checked .export-track-name { color: var(--accent); }
+.export-select-row {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.export-select-btn {
+  padding: 8px 14px;
+  border: 1px solid var(--accent-dim);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--accent);
+  font-size: 12px;
+  cursor: pointer;
+}
+.export-select-btn:active { background: rgba(212,175,55,0.1); }
+.export-option-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 0;
+}
+.export-checkbox {
+  width: 20px;
+  height: 20px;
+  border: 2px solid rgba(255,255,255,0.2);
+  border-radius: 5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.export-checkbox.checked {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.export-checkbox.checked::after {
+  content: '✓';
+  color: #0a0a0a;
+  font-size: 13px;
+  font-weight: bold;
+}
+.export-option-label {
+  flex: 1;
+  font-size: 14px;
+  color: var(--text);
+}
+
+</style>
+</head>
+<body>
+
+<!-- ==================== Auth Screen ==================== -->
+<div class="auth-screen" id="authScreen">
+  <div class="auth-logo"></div>
+  <div class="auth-logo-text">音 轨</div>
+  <div class="auth-subtitle">YINGU MUSIC</div>
+
+  <div class="auth-tabs" id="authTabs">
+    <div class="auth-tab active" data-tab="login">登录</div>
+    <div class="auth-tab" data-tab="register">注册</div>
+  </div>
+
+  <div class="auth-form" id="loginForm">
+    <div class="auth-type-row" id="loginTypeRow">
+      <div class="auth-type-btn active" data-type="phone">手机号</div>
+      <div class="auth-type-btn" data-type="email">邮箱</div>
+      <div class="auth-type-btn" data-type="wechat">微信</div>
+      <div class="auth-type-btn" data-type="qq">QQ</div>
+    </div>
+    <div class="auth-input-group">
+      <input type="text" class="auth-input" id="loginAccount" placeholder="请输入手机号/邮箱/账号">
+    </div>
+    <div class="auth-input-group" id="loginCodeGroup" style="display:none;">
+      <input type="text" class="auth-input code-input" id="loginCode" placeholder="请输入验证码" maxlength="6">
+      <button class="auth-code-btn" id="loginCodeBtn">获取验证码</button>
+    </div>
+    <div class="auth-input-group" id="loginPwdGroup">
+      <input type="password" class="auth-input" id="loginPassword" placeholder="请输入密码">
+    </div>
+    <div class="auth-error" id="loginError"></div>
+    <button class="auth-submit-btn" id="loginSubmitBtn">登 录</button>
+    <div class="auth-forgot" id="forgotPwdBtn">忘记密码？</div>
+    <div class="auth-guest" id="guestBtn">游客模式（数据不备份）</div>
+  </div>
+
+  <div class="auth-form" id="registerForm" style="display:none;">
+    <div class="auth-type-row" id="registerTypeRow">
+      <div class="auth-type-btn active" data-type="phone">手机号</div>
+      <div class="auth-type-btn" data-type="email">邮箱</div>
+    </div>
+    <div class="auth-input-group">
+      <input type="text" class="auth-input" id="regAccount" placeholder="请输入手机号或邮箱">
+    </div>
+    <div class="auth-input-group">
+      <input type="text" class="auth-input code-input" id="regCode" placeholder="请输入验证码" maxlength="6">
+      <button class="auth-code-btn" id="regCodeBtn">获取验证码</button>
+    </div>
+    <div class="auth-input-group">
+      <input type="password" class="auth-input" id="regPassword" placeholder="设置密码（6-20位）">
+    </div>
+    <div class="auth-input-group">
+      <input type="password" class="auth-input" id="regPassword2" placeholder="确认密码">
+    </div>
+    <div class="auth-error" id="regError"></div>
+    <button class="auth-submit-btn" id="registerSubmitBtn">注 册</button>
+  </div>
+</div>
+
+
+<!-- Player View -->
+<div id="player-view">
+  <div class="top-bar">
+    <div class="top-left">
+      <svg class="settings-icon" id="settingsBtn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="3"/>
+        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+      </svg>
+      <span class="app-title">音轨</span>
+    </div>
+    <div class="list-btn" id="listBtn"></div>
+  </div>
+
+  <div class="record-container">
+    <div class="record-wrap" id="recordWrap">
+      <div class="record" id="record">
+        <div class="record-image-overlay" id="recordImageOverlay"></div>
+        <div class="record-label" id="recordLabel">
+          <div class="label-image-overlay" id="labelImageOverlay"></div>
+          <span class="label-text" id="labelText">音轨</span>
+          <span class="label-sub">YINGU</span>
+        </div>
+        <div class="record-hole"></div>
+      </div>
+      <div class="record-gloss"></div>
+      <div class="loading-ring" id="loadingRing"></div>
+    </div>
+  </div>
+
+  <div class="seek-display" id="seekDisplay">
+    <span id="seekCurrent">0:00</span> / <span id="seekDuration">0:00</span>
+  </div>
+
+  <div class="progress-bar" id="progressBar">
+    <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
+  </div>
+
+  <div class="mode-indicator" id="modeIndicator">
+    <span class="mode-dot" id="modeDot1"></span>
+    <span id="modeText">顺序播放</span>
+    <span class="mode-dot" id="modeDot2"></span>
+  </div>
+</div>
+
+<!-- List View -->
+<div id="list-view" class="slide-panel">
+  <div class="panel-header">
+    <div class="back-btn" id="backBtn"></div>
+    <span class="panel-title">曲目列表</span>
+  </div>
+
+  <div class="category-bar" id="categoryBar"></div>
+
+  <div class="list-actions" id="listActions">
+    <div class="action-btn" id="addAudioBtn"><span class="action-icon">+</span>添加音频</div>
+    <div class="action-btn" id="extractVideoBtn"><span class="action-icon">►</span>提取视频音频</div>
+  </div>
+
+  <div class="batch-toolbar" id="batchToolbar">
+    <div class="batch-select-all" id="batchSelectAll"><div class="check-box"></div><span>全选</span></div>
+    <span class="batch-count" id="batchCount">已选 0 项</span>
+    <button class="batch-categorize-btn" id="batchCategorizeBtn" disabled>分类</button>
+    <button class="batch-delete-btn" id="batchDeleteConfirm" disabled>删除</button>
+  </div>
+
+  <div class="track-list-wrapper" id="trackListWrapper">
+    <div class="track-list" id="trackList">
+      <div class="empty-list"><div class="empty-icon">♪</div>暂无曲目，请添加音频文件</div>
+    </div>
+  </div>
+</div>
+
+<!-- Settings View -->
+<div id="settings-view" class="slide-panel">
+  <div class="panel-header">
+    <div class="back-btn" id="settingsBackBtn"></div>
+    <span class="panel-title">设置</span>
+  </div>
+
+  <div class="settings-content">
+    
+    <div class="settings-section" id="accountSection">
+      <div class="settings-section-title" id="accountToggle">
+        <span>账户</span>
+        <span class="arrow">▼</span>
+      </div>
+      <div class="settings-section-body" id="accountBody">
+        <div id="accountLoggedIn" style="display:none;">
+          <div class="account-info">
+            <div class="account-avatar" id="accountAvatar">♪</div>
+            <div class="account-details">
+              <div class="account-name" id="accountNameDisplay">未登录</div>
+              <div class="account-type-label" id="accountTypeLabel"></div>
+            </div>
+            <div class="account-logout-btn" id="logoutBtn">退出</div>
+          </div>
+          <div class="account-sync-status">
+            <span class="sync-dot" id="syncDot"></span>
+            <span id="syncStatusText">数据已同步备份</span>
+          </div>
+          <div style="margin-top:16px; display:flex; gap:10px;">
+            <div class="data-btn" id="manualBackupBtn" style="flex:1;">立即备份</div>
+            <div class="data-btn" id="switchAccountBtn" style="flex:1;">切换账号</div>
+          </div>
+        </div>
+        <div id="accountLoggedOut">
+          <p style="color:var(--text-dim); font-size:14px; line-height:1.6; margin-bottom:16px;">登录账户后，您的所有数据（音频、分类、自定义设置）将自动备份。卸载或更换设备后，登录账户即可恢复所有数据。</p>
+          <div class="data-btn" id="loginFromSettingsBtn" style="text-align:center; padding:14px;">登录 / 注册账户</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="settings-section collapsed" id="beautifySection">
+      <div class="settings-section-title" id="beautifyToggle"><span>美化</span><span class="arrow">▼</span></div>
+      <div class="settings-section-body" id="beautifyBody">
+        <div class="settings-row"><div class="settings-label">背景颜色</div><div class="color-swatches" id="bgSwatches"></div></div>
+        <div class="settings-row">
+          <div class="settings-label">背景透明度</div>
+          <div class="opacity-slider-wrap">
+            <input type="range" class="opacity-slider" id="bgOpacitySlider" min="0" max="100" value="100" step="5">
+            <span class="opacity-value" id="bgOpacityValue">100%</span>
+          </div>
+        </div>
+        <div class="settings-row"><div class="settings-label">唱片颜色</div><div class="color-swatches" id="recordSwatches"></div></div>
+        <div class="settings-row">
+          <div class="settings-label">唱片透明度</div>
+          <div class="opacity-slider-wrap">
+            <input type="range" class="opacity-slider" id="recordOpacitySlider" min="20" max="100" value="100" step="5">
+            <span class="opacity-value" id="recordOpacityValue">100%</span>
+          </div>
+        </div>
+        <div class="settings-row"><div class="settings-label">标签颜色</div><div class="color-swatches" id="labelSwatches"></div></div>
+        <div class="settings-row">
+          <div class="settings-label">标签透明度</div>
+          <div class="opacity-slider-wrap">
+            <input type="range" class="opacity-slider" id="labelOpacitySlider" min="20" max="100" value="100" step="5">
+            <span class="opacity-value" id="labelOpacityValue">100%</span>
+          </div>
+        </div>
+        <div class="settings-row"><div class="settings-label">自定义背景图片</div><div class="bg-image-grid" id="bgImageGrid"></div></div>
+        <div class="settings-row" id="bgOpacityRow" style="display:none;">
+          <div class="settings-label">图片透明度</div>
+          <div class="opacity-slider-wrap">
+            <input type="range" class="opacity-slider" id="opacitySlider" min="10" max="100" value="55" step="5">
+            <span class="opacity-value" id="opacityValue">55%</span>
+          </div>
+        </div>
+        <div class="settings-row"><div class="settings-label">自定义唱片图片</div><div class="bg-image-grid" id="recordImageGrid"></div></div>
+        <div class="settings-row" id="recordImgOpacityRow" style="display:none;">
+          <div class="settings-label">唱片图片透明度</div>
+          <div class="opacity-slider-wrap">
+            <input type="range" class="opacity-slider" id="recordImgOpacitySlider" min="20" max="100" value="100" step="5">
+            <span class="opacity-value" id="recordImgOpacityValue">100%</span>
+          </div>
+        </div>
+        <div class="settings-row"><div class="settings-label">自定义标签图片</div><div class="bg-image-grid" id="labelImageGrid"></div></div>
+        <div class="settings-row" id="labelImgOpacityRow" style="display:none;">
+          <div class="settings-label">标签图片透明度</div>
+          <div class="opacity-slider-wrap">
+            <input type="range" class="opacity-slider" id="labelImgOpacitySlider" min="20" max="100" value="100" step="5">
+            <span class="opacity-value" id="labelImgOpacityValue">100%</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="settings-section collapsed" id="dataSection">
+      <div class="settings-section-title" id="dataToggle"><span>数据</span><span class="arrow">▼</span></div>
+      <div class="settings-section-body">
+        <div class="data-btns">
+          <div class="data-btn" id="exportBtn">选择导出</div>
+          <div class="data-btn" id="importBtn">导入数据</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Toast & Modal -->
+<div class="toast" id="toast"></div>
+<div class="modal-overlay" id="modalOverlay">
+  <div class="modal" id="modal">
+    <div class="modal-title" id="modalTitle">提示</div>
+    <div class="modal-body" id="modalBody"></div>
+    <div class="modal-actions" id="modalActions"></div>
+  </div>
+</div>
+
+<!-- Media -->
+<audio id="audioPlayer" preload="auto" playsinline webkit-playsinline crossorigin="anonymous"></audio>
+<video id="videoPlayer" preload="auto" playsinline webkit-playsinline crossorigin="anonymous"></video>
+
+<!-- File Inputs -->
+<input type="file" id="audioInput" accept="audio/*" multiple>
+<input type="file" id="videoInput" accept="video/*" multiple>
+<input type="file" id="bgImageInput" accept="image/*" multiple>
+<input type="file" id="recordImageInput" accept="image/*" multiple>
+<input type="file" id="labelImageInput" accept="image/*" multiple>
+<input type="file" id="importInput" accept="application/json,.json">
+<script>
+'use strict';
+
+// ==================== State ====================
+let nextTrackId = 1;
+let nextCategoryId = 1;
+
+let categories = [
+  { id: 'cat-0', name: '默认' }
+];
+
+let tracks = [
+  { id: 0, name: 'SoundHelix Song 1', src: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3', type: 'audio', categoryId: 'cat-0' },
+  { id: 1, name: 'SoundHelix Song 2', src: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3', type: 'audio', categoryId: 'cat-0' },
+  { id: 2, name: 'SoundHelix Song 3', src: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3', type: 'audio', categoryId: 'cat-0' },
+];
+nextTrackId = 3;
+nextCategoryId = 1;
+
+let currentCategoryId = 'cat-0';
+let currentIndex = 0;
+let isPlaying = false;
+let playMode = 'sequence';
+let currentMedia = null;
+
+// ==================== 数据持久化 ====================
+let _db = null;
+const DB_NAME = 'yingu_player_db';
+const DB_STORE = 'files';
+const LS_KEY = 'yingu_player_data';
+const DATA_FILE = 'yingu_player_data.json';
+
+function openDB() {
+  return new Promise((resolve, reject) => {
+    try {
+      const req = indexedDB.open(DB_NAME, 1);
+      req.onupgradeneeded = e => {
+        const db = e.target.result;
+        if (!db.objectStoreNames.contains(DB_STORE)) {
+          db.createObjectStore(DB_STORE);
+        }
+      };
+      req.onsuccess = e => { _db = e.target.result; resolve(_db); };
+      req.onerror = e => { console.warn('IndexedDB 打开失败'); resolve(null); };
+    } catch(e) {
+      console.warn('IndexedDB 不可用:', e);
+      resolve(null);
+    }
+  });
+}
+
+function saveToFile(jsonStr) {
+  return new Promise((resolve) => {
+    if (!window.cordova || !window.resolveLocalFileSystemURL) {
+      try { localStorage.setItem(LS_KEY, jsonStr); } catch(e) {}
+      resolve();
+      return;
+    }
+    const path = cordova.file.dataDirectory || cordova.file.filesDirectory || cordova.file.applicationStorageDirectory;
+    if (!path) { try { localStorage.setItem(LS_KEY, jsonStr); } catch(e) {} resolve(); return; }
+    window.resolveLocalFileSystemURL(path, function(dirEntry) {
+      dirEntry.getFile(DATA_FILE, { create: true }, function(fileEntry) {
+        fileEntry.createWriter(function(writer) {
+          writer.onwriteend = function() { resolve(); };
+          writer.onerror = function() {
+            try { localStorage.setItem(LS_KEY, jsonStr); } catch(e) {}
+            resolve();
+          };
+          writer.write(jsonStr);
+        }, function() {
+          try { localStorage.setItem(LS_KEY, jsonStr); } catch(e) {}
+          resolve();
+        });
+      }, function() {
+        try { localStorage.setItem(LS_KEY, jsonStr); } catch(e) {}
+        resolve();
+      });
+    }, function() {
+      try { localStorage.setItem(LS_KEY, jsonStr); } catch(e) {}
+      resolve();
+    });
+  });
+}
+
+function loadFromFile() {
+  return new Promise((resolve) => {
+    if (!window.cordova || !window.resolveLocalFileSystemURL) {
+      try { resolve(localStorage.getItem(LS_KEY)); } catch(e) { resolve(null); }
+      return;
+    }
+    const path = cordova.file.dataDirectory || cordova.file.filesDirectory || cordova.file.applicationStorageDirectory;
+    if (!path) { try { resolve(localStorage.getItem(LS_KEY)); } catch(e) { resolve(null); } return; }
+    window.resolveLocalFileSystemURL(path, function(dirEntry) {
+      dirEntry.getFile(DATA_FILE, {}, function(fileEntry) {
+        fileEntry.file(function(file) {
+          const reader = new FileReader();
+          reader.onloadend = function() {
+            if (this.result) { resolve(this.result); }
+            else { try { resolve(localStorage.getItem(LS_KEY)); } catch(e) { resolve(null); } }
+          };
+          reader.onerror = function() {
+            try { resolve(localStorage.getItem(LS_KEY)); } catch(e) { resolve(null); }
+          };
+          reader.readAsText(file);
+        }, function() {
+          try { resolve(localStorage.getItem(LS_KEY)); } catch(e) { resolve(null); }
+        });
+      }, function() {
+        try { resolve(localStorage.getItem(LS_KEY)); } catch(e) { resolve(null); }
+      });
+    }, function() {
+      try { resolve(localStorage.getItem(LS_KEY)); } catch(e) { resolve(null); }
+    });
+  });
+}
+
+function dbPut(key, blob) {
+  return new Promise((resolve, reject) => {
+    if (!_db) return reject('DB not open');
+    const tx = _db.transaction(DB_STORE, 'readwrite');
+    tx.objectStore(DB_STORE).put(blob, key);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+function dbGet(key) {
+  return new Promise((resolve, reject) => {
+    if (!_db) return reject('DB not open');
+    const tx = _db.transaction(DB_STORE, 'readonly');
+    const req = tx.objectStore(DB_STORE).get(key);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+function dbDelete(key) {
+  return new Promise((resolve, reject) => {
+    if (!_db) return reject('DB not open');
+    const tx = _db.transaction(DB_STORE, 'readwrite');
+    tx.objectStore(DB_STORE).delete(key);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+let _saveTimer = null;
+let _deviceReady = false;
+
+function saveAllData() {
+  _saveToNative();
+  if (_saveTimer) clearTimeout(_saveTimer);
+  _saveTimer = setTimeout(_doSave, 500);
+}
+
+function _saveToNative() {
+  try {
+    if (!_deviceReady || !window.YinguMusic || !window.YinguMusic.saveData) return;
+    const data = _serializeData();
+    const jsonStr = JSON.stringify(data);
+    YinguMusic.saveData(jsonStr);
+  } catch(e) {
+    console.warn('Native即时保存失败:', e);
+  }
+}
+
+function _serializeData() {
+  const tracksData = tracks.map(t => {
+    const copy = { ...t };
+    if (copy.src && copy.src.startsWith('blob:')) {
+      if (copy._fileKey) {
+        copy.src = 'idb:' + copy._fileKey;
+      }
+      delete copy._fileKey;
+    }
+    return copy;
+  });
+
+  function serializeImageList(arr) {
+    return arr.map((item, i) => {
+      if (typeof item === 'object' && item !== null) {
+        if (item._fileKey) return 'idb:' + item._fileKey;
+        if (item.url && item.url.startsWith('blob:')) {
+          return 'idb:' + (item._fileKey || 'img-' + i + '-' + Date.now());
+        }
+        return item.url || '';
+      }
+      if (typeof item === 'string') {
+        if (item.startsWith('blob:')) {
+          return '';
+        }
+        return item;
+      }
+      return '';
+    });
+  }
+
+  const settingsData = {
+    bgColor: settings.bgColor,
+    bgOpacity: settings.bgOpacity,
+    recordColor: settings.recordColor,
+    recordOpacity: settings.recordOpacity,
+    labelColor: settings.labelColor,
+    labelOpacity: settings.labelOpacity,
+    bgImageIndex: settings.bgImageIndex,
+    recordImageIndex: settings.recordImageIndex,
+    labelImageIndex: settings.labelImageIndex,
+    bgOpacityImage: settings.bgOpacityImage,
+    recordOpacityImage: settings.recordOpacityImage,
+    labelOpacityImage: settings.labelOpacityImage,
+    bgImages: serializeImageList(settings.bgImages),
+    recordImages: serializeImageList(settings.recordImages),
+    labelImages: serializeImageList(settings.labelImages)
+  };
+
+  return {
+    tracks: tracksData,
+    categories: categories,
+    nextTrackId: nextTrackId,
+    nextCategoryId: nextCategoryId,
+    currentCategoryId: currentCategoryId,
+    currentIndex: currentIndex,
+    playMode: playMode,
+    settings: settingsData,
+    version: 2
+  };
+}
+
+function _doSave() {
+  try {
+    const data = _serializeData();
+    const jsonStr = JSON.stringify(data);
+    localStorage.setItem(LS_KEY, jsonStr);
+    saveToFile(jsonStr);
+    console.log('[持久化] 数据已保存:', data.tracks.length, '首曲目');
+  } catch (e) {
+    console.error('[持久化] 保存失败:', e);
+  }
+}
+
+async function loadAllData() {
+  try {
+    let raw = null;
+    if (window.YinguMusic && window.YinguMusic.loadData) {
+      try {
+        raw = await new Promise((resolve) => {
+          YinguMusic.loadData(function(result) {
+            resolve(result && result.length > 0 ? result : null);
+          }, function() { resolve(null); });
+        });
+        if (raw) console.log('[持久化] 从 SharedPreferences 加载成功');
+      } catch(e) { console.warn('[持久化] SharedPreferences 加载失败:', e); }
+    }
+    if (!raw) {
+      raw = await loadFromFile();
+      if (raw) console.log('[持久化] 从文件加载成功');
+    }
+    if (!raw) {
+      raw = localStorage.getItem(LS_KEY);
+      if (raw) console.log('[持久化] 从 localStorage 加载成功');
+    }
+    if (!raw) {
+      console.log('[持久化] 无历史数据，使用默认');
+      return false;
+    }
+
+    const data = JSON.parse(raw);
+    if (!data || !data.tracks) return false;
+
+    if (data.categories && Array.isArray(data.categories)) {
+      categories = data.categories;
+    }
+    if (data.nextTrackId) nextTrackId = data.nextTrackId;
+    if (data.nextCategoryId) nextCategoryId = data.nextCategoryId;
+    if (data.currentCategoryId) currentCategoryId = data.currentCategoryId;
+    if (data.playMode) playMode = data.playMode;
+
+    tracks = [];
+    for (const t of data.tracks) {
+      const track = { ...t };
+      if (track.src && track.src.startsWith('idb:')) {
+        const fileKey = track.src.substring(4);
+        try {
+          const blob = _db ? await dbGet(fileKey) : null;
+          if (blob) {
+            track.src = URL.createObjectURL(blob);
+            track._fileKey = fileKey;
+          } else {
+            console.warn('[持久化] 音频文件未找到:', fileKey);
+            track.src = '';
+            track._fileKey = fileKey;
+          }
+        } catch (e) {
+          console.warn('[持久化] 读取音频文件失败:', fileKey);
+          track.src = '';
+          track._fileKey = fileKey;
+        }
+      }
+      tracks.push(track);
+    }
+
+    if (data.settings) {
+      const s = data.settings;
+      if (s.bgColor) settings.bgColor = s.bgColor;
+      if (s.bgOpacity !== undefined) settings.bgOpacity = s.bgOpacity;
+      if (s.recordColor) settings.recordColor = s.recordColor;
+      if (s.recordOpacity !== undefined) settings.recordOpacity = s.recordOpacity;
+      if (s.labelColor) settings.labelColor = s.labelColor;
+      if (s.labelOpacity !== undefined) settings.labelOpacity = s.labelOpacity;
+      if (s.bgImageIndex !== undefined) settings.bgImageIndex = s.bgImageIndex;
+      if (s.recordImageIndex !== undefined) settings.recordImageIndex = s.recordImageIndex;
+      if (s.labelImageIndex !== undefined) settings.labelImageIndex = s.labelImageIndex;
+      if (s.bgOpacityImage !== undefined) settings.bgOpacityImage = s.bgOpacityImage;
+      if (s.recordOpacityImage !== undefined) settings.recordOpacityImage = s.recordOpacityImage;
+      if (s.labelOpacityImage !== undefined) settings.labelOpacityImage = s.labelOpacityImage;
+
+      async function restoreImageList(refs) {
+        const result = [];
+        for (const ref of refs) {
+          if (typeof ref === 'string' && ref.startsWith('idb:')) {
+            try {
+              const blob = await dbGet(ref.substring(4));
+              if (blob) {
+                result.push({ url: URL.createObjectURL(blob), _fileKey: ref.substring(4) });
+              } else {
+                console.warn('[持久化] 图片文件未找到:', ref);
+              }
+            } catch (e) {
+              console.warn('[持久化] 读取图片失败:', ref);
+            }
+          } else if (typeof ref === 'string' && ref.length > 0 && !ref.startsWith('blob:')) {
+            result.push(ref);
+          }
+        }
+        return result;
+      }
+
+      if (s.bgImages) settings.bgImages = await restoreImageList(s.bgImages);
+      if (s.recordImages) settings.recordImages = await restoreImageList(s.recordImages);
+      if (s.labelImages) settings.labelImages = await restoreImageList(s.labelImages);
+
+      if (settings.bgImageIndex >= settings.bgImages.length) settings.bgImageIndex = settings.bgImages.length - 1;
+      if (settings.recordImageIndex >= settings.recordImages.length) settings.recordImageIndex = settings.recordImages.length - 1;
+      if (settings.labelImageIndex >= settings.labelImages.length) settings.labelImageIndex = settings.labelImages.length - 1;
+    }
+
+    if (data.currentIndex !== undefined && data.currentIndex < tracks.length) {
+      currentIndex = data.currentIndex;
+    }
+
+    console.log('[持久化] 数据已恢复:', tracks.length, '首曲目');
+    return true;
+  } catch (e) {
+    console.error('[持久化] 加载失败:', e);
+    return false;
+  }
+}
+
+// Batch mode state
+let batchMode = false;
+let batchSelected = new Set();
+
+// Rotation state
+let rotationAngle = 0;
+let rotationSpeed = 0;
+let targetSpeed = 0;
+let animating = false;
+const PLAY_SPEED = 3.2;
+const ACCEL_FACTOR = 0.025;
+
+// Settings state
+let settings = {
+  bgColor: '#0a0a0a',
+  bgOpacity: 1.0,
+  recordColor: '#030303',
+  recordOpacity: 1.0,
+  labelColor: '#c0392b',
+  labelOpacity: 1.0,
+  bgImages: [],
+  bgImageIndex: -1,
+  bgOpacityImage: 0.55,
+  recordImages: [],
+  recordImageIndex: -1,
+  recordOpacityImage: 1.0,
+  labelImages: [],
+  labelImageIndex: -1,
+  labelOpacityImage: 1.0
+};
+
+// Color presets
+const BG_PRESETS = [
+  { name: '深黑', color: '#0a0a0a' },
+  { name: '深蓝', color: '#0d1b2a' },
+  { name: '深紫', color: '#1a0a2a' },
+  { name: '深绿', color: '#0a2a1a' },
+  { name: '暖灰', color: '#1c1814' },
+  { name: '深红', color: '#2a0a0a' },
+];
+
+const RECORD_PRESETS = [
+  { name: '经典黑', color: '#030303' },
+  { name: '棕胶', color: '#1a1008' },
+  { name: '深蓝', color: '#0a0a28' },
+  { name: '深红', color: '#1a0808' },
+  { name: '深绿', color: '#082008' },
+  { name: '深灰', color: '#1a1a1a' },
+];
+
+const LABEL_PRESETS = [
+  { name: '经典红', color: '#c0392b' },
+  { name: '金色', color: '#d4af37' },
+  { name: '深蓝', color: '#2c3e50' },
+  { name: '翠绿', color: '#27ae60' },
+  { name: '紫色', color: '#8e44ad' },
+  { name: '橙色', color: '#e67e22' },
+];
+
+// Artwork for Media Session
+let artworkUrl = '';
+
+// ==================== DOM Elements ====================
+const record = document.getElementById('record');
+const recordWrap = document.getElementById('recordWrap');
+const labelText = document.getElementById('labelText');
+const modeText = document.getElementById('modeText');
+const modeDot1 = document.getElementById('modeDot1');
+const modeDot2 = document.getElementById('modeDot2');
+const trackList = document.getElementById('trackList');
+const trackListWrapper = document.getElementById('trackListWrapper');
+const categoryBar = document.getElementById('categoryBar');
+const toast = document.getElementById('toast');
+const loadingRing = document.getElementById('loadingRing');
+const audioPlayer = document.getElementById('audioPlayer');
+const videoPlayer = document.getElementById('videoPlayer');
+const audioInput = document.getElementById('audioInput');
+const videoInput = document.getElementById('videoInput');
+const batchToolbar = document.getElementById('batchToolbar');
+const listActionsEl = document.getElementById('listActions');
+const batchSelectAll = document.getElementById('batchSelectAll');
+const batchCountEl = document.getElementById('batchCount');
+const batchDeleteConfirm = document.getElementById('batchDeleteConfirm');
+const batchCategorizeBtn = document.getElementById('batchCategorizeBtn');
+const progressFill = document.getElementById('progressFill');
+const progressBar = document.getElementById('progressBar');
+const seekDisplay = document.getElementById('seekDisplay');
+const seekCurrent = document.getElementById('seekCurrent');
+const seekDuration = document.getElementById('seekDuration');
+
+currentMedia = audioPlayer;
+
+// ==================== Color Helpers ====================
+function adjustColor(hex, amount) {
+  let r = parseInt(hex.slice(1, 3), 16);
+  let g = parseInt(hex.slice(3, 5), 16);
+  let b = parseInt(hex.slice(5, 7), 16);
+  r = Math.max(0, Math.min(255, r + amount));
+  g = Math.max(0, Math.min(255, g + amount));
+  b = Math.max(0, Math.min(255, b + amount));
+  return '#' + r.toString(16).padStart(2,'0') + g.toString(16).padStart(2,'0') + b.toString(16).padStart(2,'0');
+}
+
+function hexToRgba(hex, alpha) {
+  let r = parseInt(hex.slice(1, 3), 16);
+  let g = parseInt(hex.slice(3, 5), 16);
+  let b = parseInt(hex.slice(5, 7), 16);
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
+function applySettings() {
+  const root = document.documentElement;
+  root.style.setProperty('--bg-base', settings.bgColor);
+  root.style.setProperty('--bg-mid', adjustColor(settings.bgColor, 16));
+  root.style.setProperty('--record-base', settings.recordColor);
+  root.style.setProperty('--record-mid', adjustColor(settings.recordColor, 14));
+  root.style.setProperty('--record-light', adjustColor(settings.recordColor, 28));
+  root.style.setProperty('--label-color', settings.labelColor);
+  root.style.setProperty('--label-light', adjustColor(settings.labelColor, 18));
+  root.style.setProperty('--label-dark', adjustColor(settings.labelColor, -30));
+
+  const playerView = document.getElementById('player-view');
+
+  if (settings.bgImages.length > 0 && settings.bgImageIndex >= 0 && settings.bgImageIndex < settings.bgImages.length) {
+    const imgItem = settings.bgImages[settings.bgImageIndex];
+    const imgUrl = typeof imgItem === 'string' ? imgItem : (imgItem && imgItem.url ? imgItem.url : '');
+    if (imgUrl) {
+      const imgOpacity = settings.bgOpacityImage;
+      playerView.style.background = `linear-gradient(rgba(0,0,0,${1 - imgOpacity}), rgba(0,0,0,${1 - imgOpacity + 0.1})), url('${imgUrl}') center / cover no-repeat`;
+    } else {
+      const bgAlpha = settings.bgOpacity;
+      const bgColorRgba = hexToRgba(settings.bgColor, bgAlpha);
+      const bgMidRgba = hexToRgba(adjustColor(settings.bgColor, 16), bgAlpha);
+      playerView.style.background = `radial-gradient(ellipse at 50% 45%, ${bgMidRgba} 0%, ${bgColorRgba} 50%, rgba(5,5,5,${bgAlpha}) 100%)`;
+    }
+  } else {
+    const bgAlpha = settings.bgOpacity;
+    const bgColorRgba = hexToRgba(settings.bgColor, bgAlpha);
+    const bgMidRgba = hexToRgba(adjustColor(settings.bgColor, 16), bgAlpha);
+    playerView.style.background = `radial-gradient(ellipse at 50% 45%, ${bgMidRgba} 0%, ${bgColorRgba} 50%, rgba(5,5,5,${bgAlpha}) 100%)`;
+  }
+
+  record.style.opacity = settings.recordOpacity;
+  document.getElementById('recordLabel').style.opacity = settings.labelOpacity;
+
+  const recordImgEl = document.getElementById('recordImageOverlay');
+  if (recordImgEl) {
+    if (settings.recordImages.length > 0 && settings.recordImageIndex >= 0 && settings.recordImageIndex < settings.recordImages.length) {
+      const recItem = settings.recordImages[settings.recordImageIndex];
+      const recUrl = typeof recItem === 'string' ? recItem : (recItem && recItem.url ? recItem.url : '');
+      if (recUrl) {
+        recordImgEl.style.backgroundImage = `url('${recUrl}')`;
+        recordImgEl.style.opacity = settings.recordOpacityImage;
+        recordImgEl.style.display = 'block';
+      } else {
+        recordImgEl.style.display = 'none';
+      }
+    } else {
+      recordImgEl.style.display = 'none';
+    }
+  }
+
+  const labelImgEl = document.getElementById('labelImageOverlay');
+  if (labelImgEl) {
+    if (settings.labelImages.length > 0 && settings.labelImageIndex >= 0 && settings.labelImageIndex < settings.labelImages.length) {
+      const lblItem = settings.labelImages[settings.labelImageIndex];
+      const lblUrl = typeof lblItem === 'string' ? lblItem : (lblItem && lblItem.url ? lblItem.url : '');
+      if (lblUrl) {
+        labelImgEl.style.backgroundImage = `url('${lblUrl}')`;
+        labelImgEl.style.opacity = settings.labelOpacityImage;
+        labelImgEl.style.display = 'block';
+      } else {
+        labelImgEl.style.display = 'none';
+      }
+    } else {
+      labelImgEl.style.display = 'none';
+    }
+  }
+
+  renderImageGrid('bgImageGrid', settings.bgImages, 'bgImageIndex', 'bgImageInput', '背景图片');
+  renderImageGrid('recordImageGrid', settings.recordImages, 'recordImageIndex', 'recordImageInput', '唱片图片');
+  renderImageGrid('labelImageGrid', settings.labelImages, 'labelImageIndex', 'labelImageInput', '标签图片');
+  updateAllOpacityValues();
+}
+
+function updateAllOpacityValues() {
+  const map = [
+    ['bgOpacitySlider', 'bgOpacityValue', settings.bgOpacity],
+    ['recordOpacitySlider', 'recordOpacityValue', settings.recordOpacity],
+    ['labelOpacitySlider', 'labelOpacityValue', settings.labelOpacity],
+    ['opacitySlider', 'opacityValue', settings.bgOpacityImage],
+    ['recordImgOpacitySlider', 'recordImgOpacityValue', settings.recordOpacityImage],
+    ['labelImgOpacitySlider', 'labelImgOpacityValue', settings.labelOpacityImage],
+  ];
+  map.forEach(([sliderId, valueId, val]) => {
+    const slider = document.getElementById(sliderId);
+    const label = document.getElementById(valueId);
+    if (slider) slider.value = Math.round(val * 100);
+    if (label) label.textContent = Math.round(val * 100) + '%';
+  });
+}
+
+function renderImageGrid(gridId, images, indexKey, inputId, labelName) {
+  const grid = document.getElementById(gridId);
+  if (!grid) return;
+  grid.innerHTML = '';
+
+  const opacityRowMap = {
+    'bgImageGrid': 'bgOpacityRow',
+    'recordImageGrid': 'recordImgOpacityRow',
+    'labelImageGrid': 'labelImgOpacityRow'
+  };
+  const opacityRow = document.getElementById(opacityRowMap[gridId]);
+
+  const validImages = images.filter(item => {
+    if (typeof item === 'string') return item.length > 0;
+    if (typeof item === 'object' && item !== null) {
+      return item.url && item.url.length > 0;
+    }
+    return false;
+  });
+
+  validImages.forEach((imgItem, idx) => {
+    const imgUrl = typeof imgItem === 'string' ? imgItem : imgItem.url;
+    const item = document.createElement('div');
+    const isSelected = (idx === settings[indexKey]);
+    item.className = 'bg-image-preview' + (isSelected ? ' selected' : '');
+    item.style.backgroundImage = `url('${imgUrl}')`;
+
+    const removeMini = document.createElement('div');
+    removeMini.className = 'remove-mini';
+    removeMini.textContent = '×';
+    removeMini.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const confirmed = await showModal({
+        title: `移除${labelName}`,
+        bodyHTML: `确定要移除这张${labelName}吗？`,
+        buttons: [
+          { text: '取消', value: false, style: 'cancel' },
+          { text: '移除', value: true, style: 'danger' }
+        ]
+      });
+      if (!confirmed) return;
+      if (imgUrl.startsWith('blob:')) URL.revokeObjectURL(imgUrl);
+      images.splice(idx, 1);
+      if (settings[indexKey] >= images.length) {
+        settings[indexKey] = images.length - 1;
+      }
+      applySettings();
+      saveAllData();
+      showToast('图片已移除');
+    });
+    item.appendChild(removeMini);
+
+    item.addEventListener('click', () => {
+      if (isSelected) {
+        settings[indexKey] = -1;
+      } else {
+        settings[indexKey] = idx;
+      }
+      applySettings();
+      saveAllData();
+    });
+
+    grid.appendChild(item);
+  });
+
+  const addBtn = document.createElement('div');
+  addBtn.className = 'bg-image-preview';
+  const plus = document.createElement('span');
+  plus.className = 'placeholder';
+  plus.textContent = '+';
+  addBtn.appendChild(plus);
+  addBtn.addEventListener('click', () => {
+    document.getElementById(inputId).click();
+  });
+  grid.appendChild(addBtn);
+
+  if (opacityRow) {
+    opacityRow.style.display = (validImages.length > 0) ? '' : 'none';
+  }
+}
+
+// ==================== Toast ====================
+let toastTimer = null;
+function showToast(msg) {
+  toast.textContent = msg;
+  toast.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toast.classList.remove('show'), 1800);
+}
+
+// ==================== Modal ====================
+const modalOverlay = document.getElementById('modalOverlay');
+const modalTitle = document.getElementById('modalTitle');
+const modalBody = document.getElementById('modalBody');
+const modalActions = document.getElementById('modalActions');
+
+function showModal({ title, bodyHTML, buttons }) {
+  return new Promise(resolve => {
+    modalTitle.textContent = title || '提示';
+    modalBody.innerHTML = bodyHTML || '';
+    modalActions.innerHTML = '';
+    buttons.forEach(btn => {
+      const el = document.createElement('button');
+      el.className = `modal-btn ${btn.style || ''}`;
+      el.textContent = btn.text;
+      el.addEventListener('click', () => {
+        const result = btn.onClick ? btn.onClick() : btn.value;
+        closeModal();
+        resolve(result);
+      });
+      modalActions.appendChild(el);
+    });
+    modalOverlay.classList.add('show');
+    const input = modalBody.querySelector('input');
+    if (input) {
+      setTimeout(() => input.focus(), 300);
+      input.addEventListener('keydown', e => {
+        if (e.key === 'Enter') {
+          const confirmBtn = modalActions.querySelector('.confirm');
+          if (confirmBtn) confirmBtn.click();
+        }
+      });
+    }
+  });
+}
+
+function closeModal() { modalOverlay.classList.remove('show'); }
+modalOverlay.addEventListener('click', e => { if (e.target === modalOverlay) closeModal(); });
+
+// ==================== Time Format ====================
+function formatTime(seconds) {
+  if (!seconds || isNaN(seconds)) return '0:00';
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+// ==================== Progress Bar ====================
+function updateProgress() {
+  if (currentMedia && currentMedia.duration && !isNaN(currentMedia.duration)) {
+    const percent = (currentMedia.currentTime / currentMedia.duration) * 100;
+    progressFill.style.width = percent + '%';
+  } else {
+    progressFill.style.width = '0%';
+  }
+}
+
+// ==================== Artwork Generation ====================
+function generateArtwork() {
+  const canvas = document.createElement('canvas');
+  canvas.width = 512;
+  canvas.height = 512;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = settings.bgColor;
+  ctx.fillRect(0, 0, 512, 512);
+  const cx = 256, cy = 256, r = 210;
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  const grad = ctx.createRadialGradient(cx - 40, cy - 40, 20, cx, cy, r);
+  grad.addColorStop(0, adjustColor(settings.recordColor, 28));
+  grad.addColorStop(0.5, settings.recordColor);
+  grad.addColorStop(1, settings.recordColor);
+  ctx.fillStyle = grad;
+  ctx.fill();
+  for (let i = 80; i < r; i += 3) {
+    ctx.beginPath();
+    ctx.arc(cx, cy, i, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(0,0,0,0.3)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
+  ctx.beginPath();
+  ctx.arc(cx, cy, 76, 0, Math.PI * 2);
+  const labelGrad = ctx.createRadialGradient(cx - 15, cy - 15, 5, cx, cy, 76);
+  labelGrad.addColorStop(0, adjustColor(settings.labelColor, 18));
+  labelGrad.addColorStop(0.5, settings.labelColor);
+  labelGrad.addColorStop(1, adjustColor(settings.labelColor, -30));
+  ctx.fillStyle = labelGrad;
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(cx, cy, 5, 0, Math.PI * 2);
+  ctx.fillStyle = '#000';
+  ctx.fill();
+  ctx.fillStyle = '#f5e6d3';
+  ctx.font = 'bold 20px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('音轨', cx, cy + 35);
+  ctx.font = '10px sans-serif';
+  ctx.fillStyle = 'rgba(255,230,210,0.5)';
+  ctx.fillText('YINGU', cx, cy + 50);
+  return canvas.toDataURL('image/png');
+}
+
+// ==================== Media Session API & Background Keep-Alive ====================
+let wakeLock = null;
+let silentAudioCtx = null;
+let silentSource = null;
+let keepAliveTimer = null;
+
+function startSilentKeepAlive() {
+  try {
+    if (!silentAudioCtx && 'AudioContext' in window) {
+      silentAudioCtx = new AudioContext();
+      silentSource = silentAudioCtx.createOscillator();
+      const gain = silentAudioCtx.createGain();
+      gain.gain.value = 0.001;
+      silentSource.frequency.value = 1;
+      silentSource.connect(gain);
+      gain.connect(silentAudioCtx.destination);
+      silentSource.start();
+    }
+    if (silentAudioCtx && silentAudioCtx.state === 'suspended') {
+      silentAudioCtx.resume();
+    }
+  } catch (e) {
+    console.warn('Silent keep-alive failed:', e);
+  }
+}
+
+function stopSilentKeepAlive() {
+  if (silentSource) {
+    try { silentSource.stop(); } catch (e) {}
+    silentSource = null;
+  }
+  if (silentAudioCtx) {
+    try { silentAudioCtx.close(); } catch (e) {}
+    silentAudioCtx = null;
+  }
+}
+
+function startKeepAliveTimer() {
+  stopKeepAliveTimer();
+  keepAliveTimer = setInterval(() => {
+    if (isPlaying && window.YinguMusic) {
+      try {
+        var name = tracks[currentIndex] ? tracks[currentIndex].name : '音轨';
+        YinguMusic.updatePlayback(true, name, currentIndex + 1, tracks.length);
+      } catch (e) {}
+    }
+    if (silentAudioCtx && silentAudioCtx.state === 'suspended') {
+      silentAudioCtx.resume();
+    }
+    if (isPlaying && currentMedia && currentMedia.paused) {
+      currentMedia.play().catch(function() {});
+    }
+  }, 30000);
+}
+
+function stopKeepAliveTimer() {
+  if (keepAliveTimer) {
+    clearInterval(keepAliveTimer);
+    keepAliveTimer = null;
+  }
+}
+
+async function requestWakeLock() {
+  try {
+    if ('wakeLock' in navigator) {
+      wakeLock = await navigator.wakeLock.request('screen');
+      wakeLock.addEventListener('release', () => {
+        wakeLock = null;
+      });
+    }
+  } catch (e) {
+    console.warn('Wake Lock request failed:', e);
+  }
+}
+
+function releaseWakeLock() {
+  if (wakeLock) {
+    wakeLock.release();
+    wakeLock = null;
+  }
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') {
+    _saveToNative();
+    _doSave();
+  } else if (document.visibilityState === 'visible' && isPlaying) {
+    requestWakeLock();
+    startSilentKeepAlive();
+    if (currentMedia && currentMedia.paused) {
+      currentMedia.play().catch(function() {});
+    }
+  }
+});
+
+window.addEventListener('beforeunload', () => {
+  _saveToNative();
+  _doSave();
+});
+
+if (window.cordova) {
+  document.addEventListener('pause', () => {
+    _saveToNative();
+    _doSave();
+    if (isPlaying && window.YinguMusic) {
+      try {
+        var name = tracks[currentIndex] ? tracks[currentIndex].name : '音轨';
+        YinguMusic.updatePlayback(true, name, currentIndex + 1, tracks.length);
+      } catch (e) {}
+    }
+  }, false);
+
+  document.addEventListener('resume', () => {
+    if (isPlaying) {
+      requestWakeLock();
+      startSilentKeepAlive();
+      if (currentMedia && currentMedia.paused) {
+        currentMedia.play().catch(function() {});
+      }
+      updateMediaSession();
+    }
+  }, false);
+}
+
+document.addEventListener('freeze', () => {
+  if ('mediaSession' in navigator) {
+    navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';
+  }
+});
+
+document.addEventListener('resume', () => {
+  if (isPlaying) {
+    requestWakeLock();
+    startSilentKeepAlive();
+    updateMediaSession();
+  }
+});
+
+window.addEventListener('pagehide', (event) => {
+  _saveToNative();
+  _doSave();
+  if (isPlaying) {
+    if ('mediaSession' in navigator) {
+      navigator.mediaSession.playbackState = 'playing';
+    }
+  }
+});
+
+window.addEventListener('pageshow', (event) => {
+  if (event.persisted && isPlaying) {
+    requestWakeLock();
+    startSilentKeepAlive();
+    updateMediaSession();
+  }
+});
+
+function setupMediaSession() {
+  if (!('mediaSession' in navigator)) return;
+  navigator.mediaSession.setActionHandler('play', () => play());
+  navigator.mediaSession.setActionHandler('pause', () => pause());
+  navigator.mediaSession.setActionHandler('previoustrack', () => prevTrack());
+  navigator.mediaSession.setActionHandler('nexttrack', () => nextTrack());
+  navigator.mediaSession.setActionHandler('seekbackward', (details) => {
+    if (currentMedia && currentMedia.duration) {
+      currentMedia.currentTime = Math.max(0, currentMedia.currentTime - (details.seekOffset || 10));
+      updateProgress();
+    }
+  });
+  navigator.mediaSession.setActionHandler('seekforward', (details) => {
+    if (currentMedia && currentMedia.duration) {
+      currentMedia.currentTime = Math.min(currentMedia.duration, currentMedia.currentTime + (details.seekOffset || 10));
+      updateProgress();
+    }
+  });
+  navigator.mediaSession.setActionHandler('seekto', (details) => {
+    if (currentMedia && currentMedia.duration && details.seekTime !== undefined) {
+      currentMedia.currentTime = Math.min(currentMedia.duration, Math.max(0, details.seekTime));
+      updateProgress();
+    }
+  });
+  navigator.mediaSession.setActionHandler('stop', () => pause());
+}
+
+function updateMediaSession() {
+  if (!('mediaSession' in navigator)) return;
+  const track = tracks[currentIndex];
+  if (!track) return;
+  try {
+    const artwork = [];
+    if (artworkUrl) {
+      artwork.push({ src: artworkUrl, sizes: '512x512', type: 'image/png' });
+    }
+    if (settings.recordImages.length > 0 && settings.recordImageIndex >= 0) {
+      const recItem = settings.recordImages[settings.recordImageIndex];
+      const recUrl = typeof recItem === 'string' ? recItem : (recItem && recItem.url ? recItem.url : '');
+      if (recUrl) artwork.unshift({ src: recUrl, sizes: '512x512', type: 'image/jpeg' });
+    }
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title: track.name,
+      artist: '音轨',
+      album: categories.find(c => c.id === track.categoryId)?.name || '音轨',
+      artwork: artwork.length > 0 ? artwork : [{ src: '', sizes: '512x512' }]
+    });
+    navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';
+    if ('setPositionState' in navigator.mediaSession && currentMedia && currentMedia.duration) {
+      try {
+        navigator.mediaSession.setPositionState({
+          duration: currentMedia.duration || 0,
+          position: currentMedia.currentTime || 0,
+          playbackRate: 1
+        });
+      } catch (e) {}
+    }
+  } catch (e) {}
+}
+
+// ==================== Rotation Animation ====================
+function animateRotation() {
+  rotationSpeed += (targetSpeed - rotationSpeed) * ACCEL_FACTOR;
+  rotationAngle += rotationSpeed;
+  if (rotationAngle >= 360) rotationAngle -= 360;
+  if (rotationAngle < 0) rotationAngle += 360;
+  record.style.transform = `rotate(${rotationAngle}deg)`;
+  if (isPlaying || Math.abs(rotationSpeed) > 0.05) {
+    requestAnimationFrame(animateRotation);
+  } else {
+    animating = false;
+    rotationSpeed = 0;
+  }
+}
+
+function startAnimation() {
+  if (!animating) {
+    animating = true;
+    requestAnimationFrame(animateRotation);
+  }
+}
+
+// ==================== Playback ====================
+function loadTrack(index) {
+  if (tracks.length === 0) {
+    labelText.textContent = '音轨';
+    return;
+  }
+  currentIndex = ((index % tracks.length) + tracks.length) % tracks.length;
+  const track = tracks[currentIndex];
+  const prevMedia = currentMedia;
+  if (track.type === 'video') currentMedia = videoPlayer;
+  else currentMedia = audioPlayer;
+  if (prevMedia !== currentMedia) {
+    prevMedia.pause();
+    prevMedia.currentTime = 0;
+  }
+
+  if (!track.src && track._fileKey) {
+    (async () => {
+      try {
+        const blob = _db ? await dbGet(track._fileKey) : null;
+        if (blob) {
+          track.src = URL.createObjectURL(blob);
+          currentMedia.src = track.src;
+          currentMedia.load();
+          labelText.textContent = track.name;
+          updateTrackList();
+          updateMediaSession();
+          updateProgress();
+          saveAllData();
+          showToast('已恢复音频文件');
+        } else {
+          showToast('音频文件已丢失');
+        }
+      } catch (e) {
+        showToast('加载音频失败');
+      }
+    })();
+    return;
+  }
+
+  currentMedia.src = track.src || '';
+  if (currentMedia.src) {
+    currentMedia.load();
+  } else {
+    showToast('音频文件不可用');
+  }
+  labelText.textContent = track.name;
+  updateTrackList();
+  updateMediaSession();
+  updateProgress();
+  saveAllData();
+}
+
+function play() {
+  if (tracks.length === 0) { showToast('请先添加曲目'); return; }
+  const track = tracks[currentIndex];
+  if (!track.src && track._fileKey) {
+    loadTrack(currentIndex);
+    return;
+  }
+  isPlaying = true;
+  targetSpeed = PLAY_SPEED;
+  startAnimation();
+  updateMediaSession();
+  requestWakeLock();
+  startSilentKeepAlive();
+  startKeepAliveTimer();
+  if ('mediaSession' in navigator) {
+    navigator.mediaSession.playbackState = 'playing';
+  }
+  const playPromise = currentMedia.play();
+  if (playPromise && playPromise.catch) {
+    playPromise.catch(() => { showToast('播放失败'); pause(); });
+  }
+  updateTrackList();
+}
+
+function pause() {
+  isPlaying = false;
+  targetSpeed = 0;
+  startAnimation();
+  releaseWakeLock();
+  stopKeepAliveTimer();
+  currentMedia.pause();
+  if ('mediaSession' in navigator) {
+    navigator.mediaSession.playbackState = 'paused';
+  }
+  updateTrackList();
+  updateMediaSession();
+}
+
+function togglePlay() {
+  if (isPlaying) pause(); else play();
+}
+
+function nextTrack() {
+  if (tracks.length === 0) return;
+  if (playMode === 'shuffle') {
+    let next;
+    do { next = Math.floor(Math.random() * tracks.length); }
+    while (next === currentIndex && tracks.length > 1);
+    loadTrack(next);
+  } else {
+    loadTrack(currentIndex + 1);
+  }
+  if (isPlaying) play();
+}
+
+function prevTrack() {
+  if (tracks.length === 0) return;
+  if (currentMedia.currentTime > 3) {
+    currentMedia.currentTime = 0;
+  } else {
+    loadTrack(currentIndex - 1);
+  }
+  if (isPlaying) play();
+}
+
+function onMediaEnded() {
+  if (playMode === 'shuffle') { nextTrack(); }
+  else {
+    if (currentIndex < tracks.length - 1) { loadTrack(currentIndex + 1); play(); }
+    else { pause(); loadTrack(0); }
+  }
+}
+
+function onMediaError() { showToast('无法播放此曲目'); loadingRing.classList.remove('show'); pause(); }
+function onMediaWaiting() { loadingRing.classList.add('show'); }
+function onMediaPlaying() { loadingRing.classList.remove('show'); }
+
+[audioPlayer, videoPlayer].forEach(el => {
+  el.addEventListener('ended', onMediaEnded);
+  el.addEventListener('error', onMediaError);
+  el.addEventListener('waiting', onMediaWaiting);
+  el.addEventListener('playing', onMediaPlaying);
+  el.addEventListener('canplay', () => loadingRing.classList.remove('show'));
+  el.addEventListener('timeupdate', updateProgress);
+  el.addEventListener('loadedmetadata', updateProgress);
+});
+
+// ==================== Play Mode ====================
+function togglePlayMode() {
+  if (playMode === 'sequence') {
+    playMode = 'shuffle';
+    modeText.textContent = '随机播放';
+    modeDot1.classList.add('active');
+    modeDot2.classList.add('active');
+    showToast('随机播放');
+  } else {
+    playMode = 'sequence';
+    modeText.textContent = '顺序播放';
+    modeDot1.classList.remove('active');
+    modeDot2.classList.remove('active');
+    showToast('顺序播放');
+  }
+  updateTrackList();
+  saveAllData();
+}
+
+// ==================== Record Gestures (Tap + Swipe) ====================
+let clickTimer = null;
+let touchHandled = false;
+let touchStartX = 0, touchStartY = 0, touchStartTime = 0;
+let recordGesture = 'pending';
+
+record.addEventListener('click', () => {
+  if (touchHandled) return;
+  handleTap();
+});
+
+recordWrap.addEventListener('touchstart', e => {
+  if (e.touches.length > 1) return;
+  const t = e.touches[0];
+  touchStartX = t.clientX;
+  touchStartY = t.clientY;
+  touchStartTime = Date.now();
+  recordGesture = 'pending';
+}, { passive: true });
+
+recordWrap.addEventListener('touchmove', e => {
+  if (recordGesture === 'swipe') return;
+  const t = e.touches[0];
+  const dx = t.clientX - touchStartX;
+  const dy = t.clientY - touchStartY;
+  const absDx = Math.abs(dx), absDy = Math.abs(dy);
+  if (recordGesture === 'pending') {
+    if (absDx > 50 && absDx > absDy * 1.5) {
+      recordGesture = 'swipe';
+    }
+  }
+}, { passive: true });
+
+recordWrap.addEventListener('touchend', e => {
+  touchHandled = true;
+  setTimeout(() => { touchHandled = false; }, 350);
+  const t = e.changedTouches[0];
+  const dx = t.clientX - touchStartX;
+  const dy = t.clientY - touchStartY;
+  const dt = Date.now() - touchStartTime;
+  const absDx = Math.abs(dx), absDy = Math.abs(dy);
+  if (recordGesture === 'swipe') {
+    if (dx > 0) { prevTrack(); showToast('上一曲'); }
+    else { nextTrack(); showToast('下一曲'); }
+    recordGesture = 'pending';
+    return;
+  }
+  if (absDx < 12 && absDy < 12 && dt < 300) {
+    handleTap();
+  }
+  recordGesture = 'pending';
+}, { passive: true });
+
+let mouseDownX = 0, mouseDownY = 0, mouseDown = false;
+let mouseGesture = 'pending';
+
+recordWrap.addEventListener('mousedown', e => {
+  if (touchHandled) return;
+  mouseDown = true;
+  mouseDownX = e.clientX;
+  mouseDownY = e.clientY;
+  mouseGesture = 'pending';
+});
+
+window.addEventListener('mousemove', e => {
+  if (!mouseDown) return;
+  if (mouseGesture === 'swipe') return;
+  const dx = e.clientX - mouseDownX;
+  const dy = e.clientY - mouseDownY;
+  const absDx = Math.abs(dx), absDy = Math.abs(dy);
+  if (mouseGesture === 'pending') {
+    if (absDx > 60 && absDx > absDy * 1.5) {
+      mouseGesture = 'swipe';
+    }
+  }
+});
+
+window.addEventListener('mouseup', e => {
+  if (!mouseDown) return;
+  mouseDown = false;
+  if (mouseGesture === 'swipe') {
+    const dx = e.clientX - mouseDownX;
+    if (dx > 0) { prevTrack(); showToast('上一曲'); }
+    else { nextTrack(); showToast('下一曲'); }
+    mouseGesture = 'pending';
+    return;
+  }
+  mouseGesture = 'pending';
+});
+
+function handleTap() {
+  if (clickTimer) {
+    clearTimeout(clickTimer);
+    clickTimer = null;
+    togglePlayMode();
+  } else {
+    clickTimer = setTimeout(() => {
+      if (tracks.length === 0) { showToast('请先添加曲目'); openList(); }
+      else { togglePlay(); }
+      clickTimer = null;
+    }, 220);
+  }
+}
+
+// ==================== Progress Bar Seek ====================
+let isSeeking = false;
+
+function seekToPosition(clientX) {
+  const rect = progressBar.getBoundingClientRect();
+  let percent = (clientX - rect.left) / rect.width;
+  percent = Math.max(0, Math.min(1, percent));
+  const duration = currentMedia.duration;
+  if (!duration || isNaN(duration)) return;
+  const newTime = percent * duration;
+  currentMedia.currentTime = newTime;
+  progressFill.style.width = (percent * 100) + '%';
+  seekCurrent.textContent = formatTime(newTime);
+  seekDuration.textContent = formatTime(duration);
+}
+
+function showSeekBar() {
+  const duration = currentMedia.duration;
+  seekCurrent.textContent = formatTime(currentMedia.currentTime);
+  seekDuration.textContent = formatTime(duration);
+  seekDisplay.classList.add('show');
+  progressBar.classList.add('dragging');
+}
+
+function hideSeekBar() {
+  seekDisplay.classList.remove('show');
+  progressBar.classList.remove('dragging');
+}
+
+progressBar.addEventListener('touchstart', e => {
+  e.preventDefault();
+  isSeeking = true;
+  showSeekBar();
+  const t = e.touches[0];
+  seekToPosition(t.clientX);
+}, { passive: false });
+
+progressBar.addEventListener('touchmove', e => {
+  if (!isSeeking) return;
+  e.preventDefault();
+  const t = e.touches[0];
+  seekToPosition(t.clientX);
+}, { passive: false });
+
+progressBar.addEventListener('touchend', e => {
+  if (!isSeeking) return;
+  isSeeking = false;
+  hideSeekBar();
+  updateProgress();
+}, { passive: true });
+
+progressBar.addEventListener('mousedown', e => {
+  isSeeking = true;
+  showSeekBar();
+  seekToPosition(e.clientX);
+});
+
+window.addEventListener('mousemove', e => {
+  if (!isSeeking) return;
+  seekToPosition(e.clientX);
+});
+
+window.addEventListener('mouseup', () => {
+  if (!isSeeking) return;
+  isSeeking = false;
+  hideSeekBar();
+  updateProgress();
+});
+
+// ==================== List & Settings Views ====================
+function openList() {
+  document.getElementById('list-view').classList.add('show');
+  renderCategoryBar();
+  updateTrackList();
+}
+
+function closeList() {
+  closeAllRevealedItems();
+  if (batchMode) exitBatchMode();
+  document.getElementById('list-view').classList.remove('show');
+}
+
+function openSettings() {
+  document.getElementById('settings-view').classList.add('show');
+  renderSettingsColors();
+}
+
+function closeSettings() {
+  document.getElementById('settings-view').classList.remove('show');
+}
+
+document.getElementById('listBtn').addEventListener('click', openList);
+document.getElementById('backBtn').addEventListener('click', closeList);
+document.getElementById('settingsBtn').addEventListener('click', openSettings);
+document.getElementById('settingsBackBtn').addEventListener('click', closeSettings);
+
+document.getElementById('beautifyToggle').addEventListener('click', () => {
+  const section = document.getElementById('beautifySection');
+  section.classList.toggle('collapsed');
+});
+
+document.getElementById('dataToggle').addEventListener('click', () => {
+  const section = document.getElementById('dataSection');
+  section.classList.toggle('collapsed');
+});
+
+document.getElementById('accountToggle').addEventListener('click', () => {
+  const section = document.getElementById('accountSection');
+  section.classList.toggle('collapsed');
+  const arrow = document.querySelector('#accountToggle .arrow');
+  if (arrow) arrow.textContent = section.classList.contains('collapsed') ? '▼' : '▲';
+});
+
+// Background image upload
+document.getElementById('bgImageInput').addEventListener('change', async e => {
+  const files = Array.from(e.target.files);
+  if (files.length === 0) return;
+  for (const file of files) {
+    const url = URL.createObjectURL(file);
+    const fileKey = 'img-bg-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+    try { await dbPut(fileKey, file); } catch(err) { console.warn('IndexedDB:', err); }
+    settings.bgImages.push({ url, _fileKey: fileKey });
+  }
+  settings.bgImageIndex = settings.bgImages.length - 1;
+  applySettings();
+  saveAllData();
+  showToast(`已添加 ${files.length} 张图片`);
+  e.target.value = '';
+});
+
+document.getElementById('bgOpacitySlider').addEventListener('input', e => {
+  settings.bgOpacity = parseInt(e.target.value) / 100;
+  document.getElementById('bgOpacityValue').textContent = e.target.value + '%';
+  applySettings();
+  saveAllData();
+});
+
+document.getElementById('recordOpacitySlider').addEventListener('input', e => {
+  settings.recordOpacity = parseInt(e.target.value) / 100;
+  document.getElementById('recordOpacityValue').textContent = e.target.value + '%';
+  applySettings();
+  saveAllData();
+});
+
+document.getElementById('labelOpacitySlider').addEventListener('input', e => {
+  settings.labelOpacity = parseInt(e.target.value) / 100;
+  document.getElementById('labelOpacityValue').textContent = e.target.value + '%';
+  applySettings();
+  saveAllData();
+});
+
+document.getElementById('opacitySlider').addEventListener('input', e => {
+  settings.bgOpacityImage = parseInt(e.target.value) / 100;
+  document.getElementById('opacityValue').textContent = e.target.value + '%';
+  applySettings();
+  saveAllData();
+});
+
+document.getElementById('recordImageInput').addEventListener('change', async e => {
+  const files = Array.from(e.target.files);
+  if (files.length === 0) return;
+  for (const file of files) {
+    const url = URL.createObjectURL(file);
+    const fileKey = 'img-rec-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+    try { await dbPut(fileKey, file); } catch(err) { console.warn('IndexedDB:', err); }
+    settings.recordImages.push({ url, _fileKey: fileKey });
+  }
+  settings.recordImageIndex = settings.recordImages.length - 1;
+  applySettings();
+  saveAllData();
+  showToast(`已添加 ${files.length} 张唱片图片`);
+  e.target.value = '';
+});
+
+document.getElementById('labelImageInput').addEventListener('change', async e => {
+  const files = Array.from(e.target.files);
+  if (files.length === 0) return;
+  for (const file of files) {
+    const url = URL.createObjectURL(file);
+    const fileKey = 'img-lbl-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+    try { await dbPut(fileKey, file); } catch(err) { console.warn('IndexedDB:', err); }
+    settings.labelImages.push({ url, _fileKey: fileKey });
+  }
+  settings.labelImageIndex = settings.labelImages.length - 1;
+  applySettings();
+  saveAllData();
+  showToast(`已添加 ${files.length} 张标签图片`);
+  e.target.value = '';
+});
+
+document.getElementById('recordImgOpacitySlider').addEventListener('input', e => {
+  settings.recordOpacityImage = parseInt(e.target.value) / 100;
+  document.getElementById('recordImgOpacityValue').textContent = e.target.value + '%';
+  applySettings();
+  saveAllData();
+});
+
+document.getElementById('labelImgOpacitySlider').addEventListener('input', e => {
+  settings.labelOpacityImage = parseInt(e.target.value) / 100;
+  document.getElementById('labelImgOpacityValue').textContent = e.target.value + '%';
+  applySettings();
+  saveAllData();
+});
+
+// ==================== 导出/导入功能 ====================
+
+// 辅助函数：将 blob URL 转换为 base64
+async function blobUrlToBase64(url) {
+  try {
+    const response = await fetch(url);
+    const blob = await response.blob();
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result);
+      reader.readAsDataURL(blob);
+    });
+  } catch (e) {
+    console.warn('blob转base64失败:', e);
+    return null;
+  }
+}
+
+// 辅助函数：将 base64 还原为 blob 并存入 IndexedDB
+async function base64ToBlobAndStore(dataUrl, fileKey) {
+  try {
+    const response = await fetch(dataUrl);
+    const blob = await response.blob();
+    await dbPut(fileKey, blob);
+    return blob;
+  } catch (e) {
+    console.warn('base64还原失败:', e);
+    return null;
+  }
+}
+
+// 辅助函数：判断是否为远程URL
+function isRemoteUrl(src) {
+  if (!src || typeof src !== 'string') return false;
+  return src.startsWith('http://') || src.startsWith('https://');
+}
+
+// 辅助函数：获取远程URL
+function getRemoteUrl(src) {
+  return src;
+}
+
+// 辅助函数：将任意来源（blob:、idb:、http、data:）转换为 base64
+async function anySourceToBase64(source) {
+  try {
+    if (!source) return null;
+    if (typeof source === 'object' && source.srcData) return source.srcData;
+    if (typeof source !== 'string') return null;
+    if (source.startsWith('data:')) return source;
+    if (source.startsWith('blob:')) {
+      return await blobUrlToBase64(source);
+    }
+    if (source.startsWith('idb:')) {
+      const key = source.slice(4);
+      const blob = await dbGet(key);
+      if (!blob) return null;
+      return new Promise(function(resolve) {
+        const reader = new FileReader();
+        reader.onloadend = function() { resolve(this.result); };
+        reader.readAsDataURL(blob);
+      });
+    }
+    if (source.startsWith('http://') || source.startsWith('https://')) {
+      try {
+        const response = await fetch(source);
+        const blob = await response.blob();
+        return new Promise(function(resolve) {
+          const reader = new FileReader();
+          reader.onloadend = function() { resolve(this.result); };
+          reader.readAsDataURL(blob);
+        });
+      } catch(e) {
+        console.warn('远程资源转base64失败:', e);
+        return null;
+      }
+    }
+    return null;
+  } catch(e) {
+    console.warn('anySourceToBase64失败:', e);
+    return null;
+  }
+}
+
+// 辅助函数：将 base64 还原为 blob，存入 IndexedDB，返回 {url, fileKey}
+async function base64ToBlobStoreAndUrl(dataUrl, prefix) {
+  try {
+    if (!dataUrl || !dataUrl.startsWith('data:')) return null;
+    const key = (prefix || 'file') + '-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+    const response = await fetch(dataUrl);
+    const blob = await response.blob();
+    await dbPut(key, blob);
+    const url = URL.createObjectURL(blob);
+    return { url: url, fileKey: key };
+  } catch(e) {
+    console.warn('base64ToBlobStoreAndUrl失败:', e);
+    return null;
+  }
+}
+
+// 导出按钮（已替换为多选导出，见账号系统代码）
+// 导入按钮
+document.getElementById('importBtn').addEventListener('click', function() {
+  document.getElementById('importInput').click();
+});
+
+document.getElementById('importInput').addEventListener('change', async function(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  e.target.value = '';
+
+  try {
+    const text = await file.text();
+    const data = JSON.parse(text);
+
+    if (!data.tracks && !data.settings && !data.categories) {
+      showToast('文件格式不正确');
+      return;
+    }
+
+    let msg = '将导入以下数据：\n';
+    if (data.tracks) msg += `• ${data.tracks.length} 首曲目\n`;
+    if (data.categories) msg += `• ${data.categories.length} 个分类\n`;
+    if (data.settings) {
+      if (data.settings.bgImages && data.settings.bgImages.length > 0) msg += `• ${data.settings.bgImages.length} 张背景图片\n`;
+      if (data.settings.recordImages && data.settings.recordImages.length > 0) msg += `• ${data.settings.recordImages.length} 张唱片图片\n`;
+      if (data.settings.labelImages && data.settings.labelImages.length > 0) msg += `• ${data.settings.labelImages.length} 张标签图片\n`;
+    }
+    msg += '\n⚠️ 这将替换当前所有数据，确定继续吗？';
+
+    const confirmed = await showModal({
+      title: '导入数据',
+      bodyHTML: msg.replace(/\n/g, '<br>'),
+      buttons: [
+        { text: '取消', value: false, style: 'cancel' },
+        { text: '导入', value: true, style: 'confirm' }
+      ]
+    });
+    if (!confirmed) return;
+
+    pause();
+    currentMedia.src = '';
+
+    // 恢复 tracks
+    if (data.tracks && data.tracks.length > 0) {
+      const newTracks = [];
+      for (const t of data.tracks) {
+        let src = t.src || '';
+        let fileKey = null;
+
+        if (t.srcData && t.srcData.startsWith('data:')) {
+          const key = 'audio-import-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+          const blob = await base64ToBlobAndStore(t.srcData, key);
+          if (blob) {
+            src = URL.createObjectURL(blob);
+            fileKey = key;
+          }
+        }
+
+        newTracks.push({
+          id: t.id || nextTrackId++,
+          name: t.name || '未命名',
+          src: src,
+          type: t.type || 'audio',
+          categoryId: t.categoryId || 'cat-0',
+          _fileKey: fileKey
+        });
+      }
+      tracks = newTracks;
+      nextTrackId = tracks.length;
+    }
+
+    // 恢复 categories
+    if (data.categories && Array.isArray(data.categories) && data.categories.length > 0) {
+      const hasDefault = data.categories.some(c => c.id === 'cat-0');
+      if (!hasDefault) data.categories.unshift({ id: 'cat-0', name: '默认' });
+      categories = data.categories;
+      nextCategoryId = Math.max(1, ...categories.map((c) => {
+        const match = c.id && c.id.match(/cat-(\d+)/);
+        return match ? parseInt(match[1]) : 0;
+      })) + 1;
+    }
+
+    // 恢复 settings
+    if (data.settings) {
+      const s = data.settings;
+      if (s.bgColor) settings.bgColor = s.bgColor;
+      if (s.recordColor) settings.recordColor = s.recordColor;
+      if (s.labelColor) settings.labelColor = s.labelColor;
+      if (s.bgOpacity !== undefined) settings.bgOpacity = s.bgOpacity;
+      if (s.recordOpacity !== undefined) settings.recordOpacity = s.recordOpacity;
+      if (s.labelOpacity !== undefined) settings.labelOpacity = s.labelOpacity;
+      if (s.bgOpacityImage !== undefined) settings.bgOpacityImage = s.bgOpacityImage;
+      if (s.recordOpacityImage !== undefined) settings.recordOpacityImage = s.recordOpacityImage;
+      if (s.labelOpacityImage !== undefined) settings.labelOpacityImage = s.labelOpacityImage;
+
+      async function restoreImages(imgList) {
+        const result = [];
+        for (const img of imgList || []) {
+          if (img.srcData && img.srcData.startsWith('data:')) {
+            const key = 'img-import-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+            const blob = await base64ToBlobAndStore(img.srcData, key);
+            if (blob) {
+              result.push({ url: URL.createObjectURL(blob), _fileKey: key });
+            }
+          } else if (img.src) {
+            result.push(img.src);
+          }
+        }
+        return result;
+      }
+
+      if (s.bgImages) settings.bgImages = await restoreImages(s.bgImages);
+      if (s.recordImages) settings.recordImages = await restoreImages(s.recordImages);
+      if (s.labelImages) settings.labelImages = await restoreImages(s.labelImages);
+
+      if (s.bgImageIndex !== undefined && s.bgImageIndex < settings.bgImages.length) settings.bgImageIndex = s.bgImageIndex;
+      else settings.bgImageIndex = settings.bgImages.length - 1;
+      if (s.recordImageIndex !== undefined && s.recordImageIndex < settings.recordImages.length) settings.recordImageIndex = s.recordImageIndex;
+      else settings.recordImageIndex = settings.recordImages.length - 1;
+      if (s.labelImageIndex !== undefined && s.labelImageIndex < settings.labelImages.length) settings.labelImageIndex = s.labelImageIndex;
+      else settings.labelImageIndex = settings.labelImages.length - 1;
+    }
+
+    // 恢复状态
+    if (data.currentCategoryId) currentCategoryId = data.currentCategoryId;
+    if (data.playMode) playMode = data.playMode;
+    if (data.nextTrackId) nextTrackId = data.nextTrackId;
+    if (data.nextCategoryId) nextCategoryId = data.nextCategoryId;
+    if (data.currentIndex !== undefined && data.currentIndex < tracks.length) {
+      currentIndex = data.currentIndex;
+    }
+
+    applySettings();
+    renderCategoryBar();
+    if (tracks.length > 0) {
+      loadTrack(currentIndex < tracks.length ? currentIndex : 0);
+    } else {
+      labelText.textContent = '音轨';
+    }
+    updateTrackList();
+    saveAllData();
+    showToast(`✅ 导入成功！共 ${tracks.length} 首曲目，${categories.length} 个分类`);
+
+  } catch (err) {
+    console.error('导入失败:', err);
+    showToast('导入失败：文件格式错误或数据损坏');
+  }
+});
+
+// ==================== Settings: Color Customization ====================
+function renderColorSwatches(containerId, presets, currentColor, onPick) {
+  const container = document.getElementById(containerId);
+  container.innerHTML = '';
+
+  presets.forEach(preset => {
+    const sw = document.createElement('div');
+    sw.className = 'color-swatch' + (preset.color.toLowerCase() === currentColor.toLowerCase() ? ' selected' : '');
+    sw.style.background = preset.color;
+    sw.title = preset.name;
+    sw.addEventListener('click', () => onPick(preset.color));
+    container.appendChild(sw);
+  });
+
+  const customWrap = document.createElement('div');
+  customWrap.className = 'color-custom-wrap';
+  const customInput = document.createElement('input');
+  customInput.type = 'color';
+  customInput.className = 'color-custom';
+  customInput.value = currentColor;
+  customInput.addEventListener('input', e => onPick(e.target.value));
+  customWrap.appendChild(customInput);
+  const customLabel = document.createElement('span');
+  customLabel.className = 'color-custom-label';
+  customLabel.textContent = '+';
+  customWrap.appendChild(customLabel);
+  container.appendChild(customWrap);
+}
+
+function renderSettingsColors() {
+  renderColorSwatches('bgSwatches', BG_PRESETS, settings.bgColor, color => {
+    settings.bgColor = color;
+    applySettings();
+    renderSettingsColors();
+    saveAllData();
+  });
+  renderColorSwatches('recordSwatches', RECORD_PRESETS, settings.recordColor, color => {
+    settings.recordColor = color;
+    applySettings();
+    renderSettingsColors();
+    saveAllData();
+  });
+  renderColorSwatches('labelSwatches', LABEL_PRESETS, settings.labelColor, color => {
+    settings.labelColor = color;
+    applySettings();
+    renderSettingsColors();
+    saveAllData();
+  });
+}
+
+// ==================== Category Bar ====================
+function renderCategoryBar() {
+  categoryBar.innerHTML = '';
+  categories.forEach(cat => {
+    const pill = document.createElement('div');
+    pill.className = 'category-pill' + (cat.id === currentCategoryId ? ' active' : '');
+    pill.textContent = cat.name;
+    pill.dataset.catId = cat.id;
+    attachLongPress(pill, () => showCategoryEdit(cat.id));
+    pill.addEventListener('click', () => {
+      if (pill.dataset.longPressed === '1') { pill.dataset.longPressed = '0'; return; }
+      currentCategoryId = cat.id;
+      renderCategoryBar();
+      updateTrackList();
+      saveAllData();
+    });
+    categoryBar.appendChild(pill);
+  });
+  const addBtn = document.createElement('div');
+  addBtn.className = 'category-add';
+  addBtn.textContent = '+';
+  addBtn.addEventListener('click', () => showCategoryAdd());
+  categoryBar.appendChild(addBtn);
+}
+
+async function showCategoryAdd() {
+  const name = await showModal({
+    title: '添加分类',
+    bodyHTML: '<input type="text" class="modal-input" placeholder="分类名称" maxlength="20">',
+    buttons: [
+      { text: '取消', value: null, style: 'cancel' },
+      { text: '添加', style: 'confirm', onClick: () => modalBody.querySelector('input').value.trim() }
+    ]
+  });
+  if (!name) return;
+  const newId = `cat-${nextCategoryId++}`;
+  categories.push({ id: newId, name });
+  currentCategoryId = newId;
+  renderCategoryBar();
+  updateTrackList();
+  saveAllData();
+  showToast('分类已添加');
+}
+
+async function showCategoryEdit(catId) {
+  const cat = categories.find(c => c.id === catId);
+  if (!cat) return;
+  const isDefault = catId === 'cat-0';
+  const trackCount = tracks.filter(t => t.categoryId === catId).length;
+  const name = await showModal({
+    title: '编辑分类',
+    bodyHTML: `<input type="text" class="modal-input" value="${cat.name}" maxlength="20">`,
+    buttons: [
+      { text: '取消', value: null, style: 'cancel' },
+      !isDefault ? { text: '删除', style: 'danger', onClick: () => '__DELETE__' } : null,
+      { text: '保存', style: 'confirm', onClick: () => modalBody.querySelector('input').value.trim() }
+    ].filter(Boolean)
+  });
+  if (name === '__DELETE__') {
+    const confirmed = await showModal({
+      title: '删除分类',
+      bodyHTML: `删除「${cat.name}」后，其中 ${trackCount} 首曲目将移至「默认」分类。确定删除？`,
+      buttons: [
+        { text: '取消', value: false, style: 'cancel' },
+        { text: '删除', value: true, style: 'danger' }
+      ]
+    });
+    if (!confirmed) return;
+    tracks.forEach(t => { if (t.categoryId === catId) t.categoryId = 'cat-0'; });
+    categories = categories.filter(c => c.id !== catId);
+    if (currentCategoryId === catId) currentCategoryId = 'cat-0';
+    renderCategoryBar();
+    updateTrackList();
+    saveAllData();
+    showToast('分类已删除');
+    return;
+  }
+  if (name && name !== cat.name) {
+    cat.name = name;
+    renderCategoryBar();
+    updateTrackList();
+    saveAllData();
+    showToast('分类已更新');
+  }
+}
+
+// ==================== Track List ====================
+function getFilteredTrackIndices() {
+  const result = [];
+  tracks.forEach((track, index) => {
+    if (track.categoryId === currentCategoryId) result.push(index);
+  });
+  return result;
+}
+
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+function updateTrackList() {
+  const filteredIndices = getFilteredTrackIndices();
+  if (filteredIndices.length === 0) {
+    trackList.innerHTML = `<div class="empty-list"><div class="empty-icon">♪</div>暂无曲目，请添加音频文件</div>`;
+    return;
+  }
+  trackList.innerHTML = filteredIndices.map((trackIdx, displayIdx) => {
+    const track = tracks[trackIdx];
+    const isActive = trackIdx === currentIndex;
+    const playing = isActive && isPlaying;
+    const typeLabel = track.type === 'video' ? '视频音频' : '音频';
+    const typeClass = track.type === 'video' ? 'video' : '';
+    const batchCls = batchMode ? 'batch-mode' : '';
+    const batchSel = batchSelected.has(trackIdx) ? 'batch-selected' : '';
+    const batchCheckHtml = '<div class="batch-check"></div>';
+    return `
+      <div class="track-item ${batchCls} ${batchSel} ${isActive ? 'active' : ''}" data-track-index="${trackIdx}" data-display-index="${displayIdx}">
+        <div class="track-actions">
+          <div class="track-action edit" data-action="edit">编辑</div>
+          <div class="track-action delete" data-action="delete">删除</div>
+        </div>
+        <div class="track-item-content">
+          ${batchMode ? batchCheckHtml : ''}
+          <span class="track-number">${playing ? '▶' : (displayIdx + 1)}</span>
+          <div class="track-info-cell">
+            <div class="track-name">${escapeHtml(track.name)}</div>
+            <div class="track-type ${typeClass}">${typeLabel}</div>
+          </div>
+          <span class="track-drag-handle">⋮⋮</span>
+        </div>
+      </div>`;
+  }).join('');
+  attachTrackItemListeners();
+  updateBatchUI();
+}
+
+function attachTrackItemListeners() {
+  trackList.querySelectorAll('.track-item').forEach(item => {
+    const content = item.querySelector('.track-item-content');
+    const editBtn = item.querySelector('.track-action.edit');
+    const deleteBtn = item.querySelector('.track-action.delete');
+
+    if (batchMode) {
+      content.addEventListener('touchend', e => {
+        e.preventDefault();
+        toggleBatchSelect(parseInt(item.dataset.trackIndex));
+      }, { passive: false });
+      content.addEventListener('click', e => {
+        e.preventDefault();
+        e.stopPropagation();
+      });
+      return;
+    }
+
+    function handleBtnTouch(btn, action) {
+      btn.addEventListener('touchstart', e => {
+        e.stopPropagation();
+      }, { passive: true });
+      btn.addEventListener('touchmove', e => {
+        e.stopPropagation();
+      }, { passive: true });
+      btn.addEventListener('touchend', e => {
+        e.preventDefault();
+        e.stopPropagation();
+        closeAllRevealedItems();
+        action(parseInt(item.dataset.trackIndex));
+      }, { passive: false });
+      btn.addEventListener('click', e => {
+        e.stopPropagation();
+      });
+    }
+    handleBtnTouch(editBtn, showTrackEdit);
+    handleBtnTouch(deleteBtn, showTrackDeleteConfirm);
+
+    attachTrackItemGestures(content, item);
+  });
+}
+
+// ==================== Track Item Gestures ====================
+function attachTrackItemGestures(content, item) {
+  let startX = 0, startY = 0, startTime = 0;
+  let deltaX = 0, deltaY = 0;
+  let lastDeltaY = 0;
+  let mode = 'pending';
+  let longPressTimer = null;
+  let itemHeight = 0;
+  let dragStartIndex = -1;
+  let allItems = [];
+  let trackIndices = [];
+  let lastTargetIndex = -1;
+  let autoScrollRAF = null;
+  let isHandleTouch = false;
+
+  content.addEventListener('touchstart', e => {
+    if (e.touches.length > 1) return;
+    const t = e.touches[0];
+    isHandleTouch = e.target.classList && e.target.classList.contains('track-drag-handle');
+    startX = t.clientX;
+    startY = t.clientY;
+    startTime = Date.now();
+    deltaX = 0;
+    deltaY = 0;
+    lastDeltaY = 0;
+    mode = 'pending';
+    itemHeight = content.offsetHeight || 60;
+    content.style.transition = 'none';
+
+    longPressTimer = setTimeout(() => {
+      if (mode === 'pending') {
+        if (isHandleTouch) {
+          mode = 'drag';
+          content.classList.add('dragging');
+          item.classList.add('dragging-mode');
+          trackList.querySelectorAll('.track-item').forEach(it => it.classList.add('dragging-mode'));
+          if (navigator.vibrate) navigator.vibrate(50);
+          allItems = Array.from(trackList.querySelectorAll('.track-item'));
+          trackIndices = getFilteredTrackIndices();
+          dragStartIndex = parseInt(item.dataset.displayIndex);
+          lastTargetIndex = dragStartIndex;
+        } else {
+          const trackIdx = parseInt(item.dataset.trackIndex);
+          if (navigator.vibrate) navigator.vibrate(50);
+          enterBatchMode(trackIdx);
+          mode = 'batch';
+        }
+      }
+    }, 400);
+  }, { passive: true });
+
+  content.addEventListener('touchmove', e => {
+    const t = e.touches[0];
+    deltaX = t.clientX - startX;
+    deltaY = t.clientY - startY;
+    const absDx = Math.abs(deltaX);
+    const absDy = Math.abs(deltaY);
+
+    if (mode === 'pending') {
+      if (absDx > 12 || absDy > 12) {
+        clearTimeout(longPressTimer);
+        longPressTimer = null;
+
+        if (absDx > absDy) {
+          mode = 'swipe';
+          trackList.querySelectorAll('.track-item-content.revealed, .track-item-content.near-revealed').forEach(el => {
+            if (el !== content) {
+              el.style.transition = '';
+              el.classList.remove('revealed');
+              el.classList.remove('near-revealed');
+              el.style.transform = '';
+            }
+          });
+        } else {
+          mode = 'scroll';
+          lastDeltaY = deltaY;
+          content.style.transition = '';
+          content.style.transform = '';
+        }
+      } else {
+        e.preventDefault();
+        return;
+      }
+    }
+
+    if (mode === 'swipe') {
+      e.preventDefault();
+      let translate = deltaX;
+      if (content.classList.contains('revealed')) translate = deltaX - 144;
+      if (translate > 0) translate = translate * 0.3;
+      if (translate < -144) translate = -144 + (translate + 144) * 0.3;
+      content.style.transform = `translateX(${translate}px)`;
+    } else if (mode === 'scroll') {
+      e.preventDefault();
+      const scrollDelta = deltaY - lastDeltaY;
+      trackListWrapper.scrollTop -= scrollDelta;
+      lastDeltaY = deltaY;
+    } else if (mode === 'drag') {
+      e.preventDefault();
+      content.style.transform = `translateY(${deltaY}px) scale(1.02)`;
+
+      const wrapperRect = trackListWrapper.getBoundingClientRect();
+      const contentRect = content.getBoundingClientRect();
+      const dragY = contentRect.top + contentRect.height / 2;
+      const edgeThreshold = 80;
+
+      if (autoScrollRAF) cancelAnimationFrame(autoScrollRAF);
+      if (dragY < wrapperRect.top + edgeThreshold) {
+        const speed = Math.min(15, (wrapperRect.top + edgeThreshold - dragY) / 5);
+        autoScrollRAF = requestAnimationFrame(function autoScroll() {
+          trackListWrapper.scrollTop -= speed;
+          autoScrollRAF = requestAnimationFrame(autoScroll);
+        });
+      } else if (dragY > wrapperRect.bottom - edgeThreshold) {
+        const speed = Math.min(15, (dragY - (wrapperRect.bottom - edgeThreshold)) / 5);
+        autoScrollRAF = requestAnimationFrame(function autoScroll() {
+          trackListWrapper.scrollTop += speed;
+          autoScrollRAF = requestAnimationFrame(autoScroll);
+        });
+      }
+
+      const targetIdx = Math.max(0, Math.min(allItems.length - 1,
+        dragStartIndex + Math.round(deltaY / itemHeight)));
+
+      if (targetIdx !== lastTargetIndex) {
+        lastTargetIndex = targetIdx;
+        allItems.forEach((otherItem, idx) => {
+          if (idx === dragStartIndex) return;
+          const otherContent = otherItem.querySelector('.track-item-content');
+          otherContent.style.transition = 'transform 0.2s ease';
+
+          if (dragStartIndex < targetIdx) {
+            if (idx > dragStartIndex && idx <= targetIdx) {
+              otherContent.style.transform = `translateY(${-itemHeight}px)`;
+            } else {
+              otherContent.style.transform = '';
+            }
+          } else if (dragStartIndex > targetIdx) {
+            if (idx >= targetIdx && idx < dragStartIndex) {
+              otherContent.style.transform = `translateY(${itemHeight}px)`;
+            } else {
+              otherContent.style.transform = '';
+            }
+          } else {
+            otherContent.style.transform = '';
+          }
+        });
+      }
+      item.dataset.targetIndex = targetIdx;
+    }
+  }, { passive: false });
+
+  content.addEventListener('touchend', e => {
+    clearTimeout(longPressTimer);
+    longPressTimer = null;
+    if (autoScrollRAF) { cancelAnimationFrame(autoScrollRAF); autoScrollRAF = null; }
+
+    const absDx = Math.abs(deltaX);
+    const absDy = Math.abs(deltaY);
+    const dt = Date.now() - startTime;
+
+    if (mode === 'swipe') {
+      content.style.transition = '';
+      let translate = deltaX;
+      if (content.classList.contains('revealed')) translate = deltaX - 144;
+      if (translate < -72) {
+        content.classList.add('revealed');
+        content.classList.remove('near-revealed');
+        content.style.transform = '';
+      } else if (translate < -36) {
+        content.classList.remove('revealed');
+        content.classList.add('near-revealed');
+        content.style.transform = '';
+      } else {
+        content.classList.remove('revealed');
+        content.classList.remove('near-revealed');
+        content.style.transform = '';
+      }
+    } else if (mode === 'drag') {
+      content.classList.remove('dragging');
+      trackList.querySelectorAll('.track-item').forEach(it => it.classList.remove('dragging-mode'));
+      content.style.transition = '';
+      content.style.transform = '';
+
+      allItems.forEach(otherItem => {
+        const otherContent = otherItem.querySelector('.track-item-content');
+        otherContent.style.transition = '';
+        otherContent.style.transform = '';
+      });
+
+      const targetIdx = parseInt(item.dataset.targetIndex || dragStartIndex);
+      if (targetIdx !== dragStartIndex && targetIdx >= 0 && targetIdx < trackIndices.length) {
+        const fromIdx = trackIndices[dragStartIndex];
+        const toIdx = trackIndices[targetIdx];
+        const movedTrack = tracks[fromIdx];
+        tracks.splice(fromIdx, 1);
+        tracks.splice(toIdx, 0, movedTrack);
+
+        if (currentIndex === fromIdx) {
+          currentIndex = toIdx;
+        } else if (fromIdx < currentIndex && toIdx >= currentIndex) {
+          currentIndex--;
+        } else if (fromIdx > currentIndex && toIdx <= currentIndex) {
+          currentIndex++;
+        }
+
+        showToast('已重新排序');
+      }
+      delete item.dataset.targetIndex;
+      updateTrackList();
+      saveAllData();
+    } else if (mode === 'batch') {
+    } else if (mode === 'scroll') {
+      content.style.transition = '';
+      content.style.transform = '';
+    } else if (mode === 'pending' && absDx < 12 && absDy < 12 && dt < 500) {
+      content.style.transition = '';
+      content.style.transform = '';
+      if (content.classList.contains('revealed') || content.classList.contains('near-revealed')) {
+        content.classList.remove('revealed');
+        content.classList.remove('near-revealed');
+      } else {
+        selectTrack(parseInt(item.dataset.trackIndex));
+      }
+    } else {
+      content.style.transition = '';
+      content.style.transform = '';
+    }
+    mode = 'pending';
+  }, { passive: true });
+
+  content.addEventListener('contextmenu', e => e.preventDefault());
+}
+
+function closeAllRevealedItems() {
+  trackList.querySelectorAll('.track-item-content.revealed, .track-item-content.near-revealed').forEach(el => {
+    el.classList.remove('revealed');
+    el.classList.remove('near-revealed');
+    el.style.transform = '';
+  });
+}
+
+// ==================== Track Edit / Delete ====================
+async function showTrackEdit(trackIdx) {
+  const track = tracks[trackIdx];
+  if (!track) return;
+  const catOptions = categories.map(c =>
+    `<option value="${c.id}" ${c.id === track.categoryId ? 'selected' : ''}>${escapeHtml(c.name)}</option>`
+  ).join('');
+  const result = await showModal({
+    title: '编辑曲目',
+    bodyHTML: `
+      <input type="text" class="modal-input" value="${escapeHtml(track.name)}" maxlength="50" style="margin-bottom: 12px;">
+      <select class="modal-input" style="appearance: auto; -webkit-appearance: none;">
+        ${catOptions}
+      </select>`,
+    buttons: [
+      { text: '取消', value: null, style: 'cancel' },
+      { text: '保存', style: 'confirm', onClick: () => {
+        const input = modalBody.querySelector('input');
+        const select = modalBody.querySelector('select');
+        return { name: input.value.trim(), catId: select.value };
+      }}
+    ]
+  });
+  if (!result) return;
+  if (result.name && result.name !== track.name) track.name = result.name;
+  if (result.catId && result.catId !== track.categoryId) {
+    track.categoryId = result.catId;
+    currentCategoryId = result.catId;
+    renderCategoryBar();
+  }
+  updateTrackList();
+  if (trackIdx === currentIndex) {
+    labelText.textContent = track.name;
+    updateMediaSession();
+  }
+  showToast('曲目已更新');
+  saveAllData();
+}
+
+async function showTrackDeleteConfirm(trackIdx) {
+  const track = tracks[trackIdx];
+  if (!track) return;
+  const confirmed = await showModal({
+    title: '删除曲目',
+    bodyHTML: `确定删除「${escapeHtml(track.name)}」吗？`,
+    buttons: [
+      { text: '取消', value: false, style: 'cancel' },
+      { text: '删除', value: true, style: 'danger' }
+    ]
+  });
+  if (!confirmed) return;
+  if (track.src.startsWith('blob:')) URL.revokeObjectURL(track.src);
+  if (track._fileKey) { dbDelete(track._fileKey).catch(()=>{}); }
+  tracks.splice(trackIdx, 1);
+  if (tracks.length === 0) {
+    pause();
+    currentMedia.src = '';
+    labelText.textContent = '音轨';
+    currentIndex = 0;
+  } else {
+    if (trackIdx === currentIndex) {
+      if (currentIndex >= tracks.length) currentIndex = 0;
+      loadTrack(currentIndex);
+      if (isPlaying) play();
+    } else if (trackIdx < currentIndex) {
+      currentIndex--;
+    }
+  }
+  updateTrackList();
+  saveAllData();
+  showToast('已删除');
+}
+
+// ==================== Batch Delete ====================
+function toggleBatchSelect(trackIdx) {
+  if (batchSelected.has(trackIdx)) {
+    batchSelected.delete(trackIdx);
+  } else {
+    batchSelected.add(trackIdx);
+  }
+  updateTrackList();
+}
+
+function updateBatchUI() {
+  const count = batchSelected.size;
+  batchCountEl.textContent = `已选 ${count} 项`;
+  batchDeleteConfirm.disabled = count === 0;
+  batchCategorizeBtn.disabled = count === 0;
+
+  const filtered = getFilteredTrackIndices();
+  const allSelected = filtered.length > 0 && filtered.every(idx => batchSelected.has(idx));
+  batchSelectAll.classList.toggle('checked', allSelected);
+}
+
+function enterBatchMode(initialTrackIdx) {
+  batchMode = true;
+  batchSelected.clear();
+  closeAllRevealedItems();
+  listActionsEl.classList.add('batch-mode');
+  batchToolbar.classList.add('show');
+  if (initialTrackIdx !== undefined && initialTrackIdx !== null) {
+    batchSelected.add(initialTrackIdx);
+  }
+  updateTrackList();
+}
+
+function exitBatchMode() {
+  batchMode = false;
+  batchSelected.clear();
+  listActionsEl.classList.remove('batch-mode');
+  batchToolbar.classList.remove('show');
+  updateTrackList();
+}
+
+batchSelectAll.addEventListener('click', () => {
+  const filtered = getFilteredTrackIndices();
+  const allSelected = filtered.every(idx => batchSelected.has(idx));
+  if (allSelected) {
+    filtered.forEach(idx => batchSelected.delete(idx));
+  } else {
+    filtered.forEach(idx => batchSelected.add(idx));
+  }
+  updateTrackList();
+});
+
+async function showBatchCategorize() {
+  const count = batchSelected.size;
+  if (count === 0) return;
+
+  const catOptions = categories.map(c => ({
+    text: c.name,
+    value: c.id
+  }));
+  catOptions.unshift({ text: '取消', value: null, style: 'cancel' });
+
+  const result = await showModal({
+    title: '移动到分类',
+    bodyHTML: `将选中的 <strong style="color:var(--accent)">${count}</strong> 首曲目移动到分类：`,
+    buttons: catOptions
+  });
+
+  if (!result) return;
+
+  batchSelected.forEach(idx => {
+    if (tracks[idx]) tracks[idx].categoryId = result;
+  });
+
+  const catName = categories.find(c => c.id === result)?.name || '';
+  exitBatchMode();
+  showToast(`已移动 ${count} 首到「${catName}」`);
+  saveAllData();
+}
+batchCategorizeBtn.addEventListener('click', showBatchCategorize);
+
+batchDeleteConfirm.addEventListener('click', async () => {
+  const count = batchSelected.size;
+  if (count === 0) return;
+
+  const confirmed = await showModal({
+    title: '批量删除',
+    bodyHTML: `确定删除选中的 <strong style="color:var(--delete-red)">${count}</strong> 首曲目吗？`,
+    buttons: [
+      { text: '取消', value: false, style: 'cancel' },
+      { text: '删除', value: true, style: 'danger' }
+    ]
+  });
+  if (!confirmed) return;
+
+  const toDelete = Array.from(batchSelected).sort((a, b) => b - a);
+  toDelete.forEach(idx => {
+    const track = tracks[idx];
+    if (track && track.src.startsWith('blob:')) URL.revokeObjectURL(track.src);
+    if (track && track._fileKey) { dbDelete(track._fileKey).catch(()=>{}); }
+    tracks.splice(idx, 1);
+  });
+
+  batchSelected.clear();
+
+  if (tracks.length === 0) {
+    pause();
+    currentMedia.src = '';
+    labelText.textContent = '音轨';
+    currentIndex = 0;
+  } else {
+    if (toDelete.includes(currentIndex) || currentIndex >= tracks.length) {
+      currentIndex = 0;
+      loadTrack(0);
+      if (isPlaying) play();
+    } else {
+      let adjust = toDelete.filter(idx => idx < currentIndex).length;
+      currentIndex -= adjust;
+    }
+  }
+
+  exitBatchMode();
+  saveAllData();
+  showToast(`已删除 ${count} 首曲目`);
+});
+
+function selectTrack(index) {
+  loadTrack(index);
+  play();
+  closeList();
+}
+
+// ==================== File Management ====================
+
+document.getElementById('addAudioBtn').addEventListener('click', function(e) {
+  audioInput.setAttribute('multiple', 'multiple');
+  audioInput.click();
+});
+
+document.getElementById('extractVideoBtn').addEventListener('click', function(e) {
+  videoInput.setAttribute('multiple', 'multiple');
+  videoInput.click();
+});
+
+audioInput.addEventListener('change', async e => {
+  const files = Array.from(e.target.files);
+  if (files.length === 0) return;
+  for (const file of files) {
+    const url = URL.createObjectURL(file);
+    const name = file.name.replace(/\.[^/.]+$/, '');
+    const fileKey = 'audio-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+    try { await dbPut(fileKey, file); } catch(e) { console.warn('IndexedDB 存储失败:', e); }
+    tracks.push({ id: nextTrackId++, name, src: url, type: 'audio', categoryId: currentCategoryId, _fileKey: fileKey });
+  }
+  updateTrackList();
+  saveAllData();
+  showToast(`已添加 ${files.length} 首音频`);
+  e.target.value = '';
+});
+
+videoInput.addEventListener('change', async e => {
+  const files = Array.from(e.target.files);
+  if (files.length === 0) return;
+  for (const file of files) {
+    const url = URL.createObjectURL(file);
+    const name = file.name.replace(/\.[^/.]+$/, '') + ' (视频音频)';
+    const fileKey = 'video-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+    try { await dbPut(fileKey, file); } catch(e) { console.warn('IndexedDB 存储失败:', e); }
+    tracks.push({ id: nextTrackId++, name, src: url, type: 'video', categoryId: currentCategoryId, _fileKey: fileKey });
+  }
+  updateTrackList();
+  saveAllData();
+  showToast(`已提取 ${files.length} 个视频音频`);
+  e.target.value = '';
+});
+
+// ==================== Long Press Helper ====================
+function attachLongPress(element, callback) {
+  let timer = null;
+  let startX = 0, startY = 0;
+  element.addEventListener('touchstart', e => {
+    const t = e.touches[0];
+    startX = t.clientX;
+    startY = t.clientY;
+    timer = setTimeout(() => {
+      element.dataset.longPressed = '1';
+      if (navigator.vibrate) navigator.vibrate(30);
+      callback();
+    }, 500);
+  }, { passive: true });
+  element.addEventListener('touchmove', e => {
+    const t = e.touches[0];
+    if (Math.abs(t.clientX - startX) > 10 || Math.abs(t.clientY - startY) > 10) {
+      clearTimeout(timer);
+      timer = null;
+    }
+  }, { passive: true });
+  element.addEventListener('touchend', () => { clearTimeout(timer); }, { passive: true });
+}
+
+// ==================== Keyboard Support ====================
+document.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+  const listViewOpen = document.getElementById('list-view').classList.contains('show');
+  const settingsOpen = document.getElementById('settings-view').classList.contains('show');
+
+  if (listViewOpen) { if (e.key === 'Escape') closeList(); return; }
+  if (settingsOpen) { if (e.key === 'Escape') closeSettings(); return; }
+
+  switch (e.key) {
+    case ' ': case 'Spacebar':
+      e.preventDefault(); togglePlay(); break;
+    case 'ArrowLeft':
+      e.preventDefault(); prevTrack(); showToast('上一曲'); break;
+    case 'ArrowRight':
+      e.preventDefault(); nextTrack(); showToast('下一曲'); break;
+  }
+});
+
+recordWrap.addEventListener('contextmenu', e => e.preventDefault());
+
+trackList.addEventListener('click', e => {
+  if (!e.target.closest('.track-item')) closeAllRevealedItems();
+}, true);
+
+trackList.addEventListener('contextmenu', e => e.preventDefault());
+
+// ==================== Init ====================
+// UI 初始化函数（数据加载完成后调用）
+function initUI() {
+  applySettings();
+  artworkUrl = generateArtwork();
+  setupMediaSession();
+  renderCategoryBar();
+  renderSettingsColors();
+  if (tracks.length > 0 && currentIndex < tracks.length) {
+    loadTrack(currentIndex);
+  } else if (tracks.length > 0) {
+    currentIndex = 0;
+    loadTrack(0);
+  }
+  updateTrackList();
+}
+
+// ==================== App Init ====================
+async function loadAndInit() {
+  try {
+    await openDB();
+    const hasData = await loadAllData();
+    if (hasData) console.log('[持久化] 已恢复历史数据');
+  } catch (e) {
+    console.warn('[持久化] 初始化失败:', e);
+  }
+  initUI();
+}
+
+function _onDeviceReady() {
+  _deviceReady = true;
+  console.log('[持久化] deviceready 已触发');
+  setupCordovaBridge();
+  // 先检查认证状态
+  checkAuthAndInit();
+}
+
+if (window.cordova) {
+  if (typeof cordova !== 'undefined' && cordova.fired) {
+    _onDeviceReady();
+  } else {
+    document.addEventListener('deviceready', _onDeviceReady, false);
+    setTimeout(function() {
+      if (!_deviceReady) {
+        console.warn('[持久化] deviceready 超时，强制加载');
+        _deviceReady = true;
+        setupCordovaBridge();
+        checkAuthAndInit();
+      }
+    }, 3000);
+  }
+} else {
+  // 浏览器环境：直接检查认证
+  checkAuthAndInit();
+}
+
+// ==================== Cordova Integration ====================
+function setupCordovaBridge() {
+  if (!window.YinguMusic) return;
+
+  YinguMusic.onControl(function(action) {
+    switch (action) {
+      case 'toggle': togglePlay(); break;
+      case 'next': nextTrack(); break;
+      case 'prev': prevTrack(); break;
+      case 'play': play(); break;
+      case 'pause': pause(); break;
+    }
+  });
+
+  var _origPlay = play, _origPause = pause, _origLoad = loadTrack;
+  var serviceStarted = false;
+
+  function notifyNative() {
+    try {
+      var name = tracks[currentIndex] ? tracks[currentIndex].name : '音轨';
+      var idx = currentIndex + 1, total = tracks.length;
+
+      if (isPlaying && !serviceStarted) {
+        YinguMusic.startService();
+        serviceStarted = true;
+      }
+
+      YinguMusic.updatePlayback(isPlaying, name, idx, total);
+
+      if (!isPlaying) {
+        serviceStarted = false;
+      }
+    } catch (e) {
+      console.warn('Cordova notifyNative error:', e);
+    }
+  }
+
+  play = function() { _origPlay(); setTimeout(notifyNative, 50); };
+  pause = function() { _origPause(); setTimeout(notifyNative, 50); };
+  loadTrack = function(i) { _origLoad(i); setTimeout(notifyNative, 100); };
+
+  setTimeout(notifyNative, 500);
+}
+
+if (!window.cordova && 'serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').then(reg => {
+      console.log('音轨 Service Worker registered');
+    }).catch(err => {
+      console.warn('SW registration failed:', err);
+    });
+  });
+}
+
+// ==================== 账号系统 ====================
+const ACCOUNTS_KEY = 'yingu_accounts';
+const CURRENT_USER_KEY = 'yingu_current_user';
+const BACKUP_DIR = '音轨备份';
+
+let currentUser = null; // { id, account, type, password }
+let authTab = 'login';
+let loginType = 'phone';
+let registerType = 'phone';
+let codeCountdown = 0;
+let codeTimer = null;
+let generatedCodes = {}; // { account: code } for simulation
+
+function getAccounts() {
+  try {
+    const raw = localStorage.getItem(ACCOUNTS_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch(e) { return {}; }
+}
+
+function saveAccounts(accounts) {
+  localStorage.setItem(ACCOUNTS_KEY, JSON.stringify(accounts));
+}
+
+function getCurrentUser() {
+  try {
+    const raw = localStorage.getItem(CURRENT_USER_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch(e) { return null; }
+}
+
+function setCurrentUser(user) {
+  if (user) {
+    localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(user));
+    currentUser = user;
+  } else {
+    localStorage.removeItem(CURRENT_USER_KEY);
+    currentUser = null;
+  }
+}
+
+// 生成6位验证码（模拟短信/邮箱验证码）
+function generateCode() {
+  return Math.floor(100000 + Math.random() * 900000).toString();
+}
+
+function maskAccount(account) {
+  if (!account) return '';
+  if (account.includes('@')) {
+    const [name, domain] = account.split('@');
+    return name.substring(0, 3) + '***@' + domain;
+  }
+  if (/^1\d{10}$/.test(account)) {
+    return account.substring(0, 3) + '****' + account.substring(7);
+  }
+  if (account.length <= 4) return account[0] + '***';
+  return account.substring(0, 2) + '***' + account.substring(account.length - 2);
+}
+
+function getTypeLabel(type) {
+  const map = { phone: '手机号', email: '邮箱', wechat: '微信', qq: 'QQ' };
+  return map[type] || '账号';
+}
+
+function validateAccount(acc, type) {
+  if (!acc || acc.length < 3) return '账号长度至少3位';
+  if (type === 'phone' && !/^1\d{10}$/.test(acc)) return '请输入正确的手机号';
+  if (type === 'email' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(acc)) return '请输入正确的邮箱';
+  return null;
+}
+
+function validatePassword(pwd) {
+  if (!pwd || pwd.length < 6) return '密码至少6位';
+  if (pwd.length > 20) return '密码不超过20位';
+  return null;
+}
+
+// 显示/隐藏认证界面
+function showAuthScreen() {
+  document.getElementById('authScreen').classList.remove('hidden');
+}
+function hideAuthScreen() {
+  document.getElementById('authScreen').classList.add('hidden');
+}
+
+// 切换登录/注册标签
+document.getElementById('authTabs').addEventListener('click', function(e) {
+  const tab = e.target.closest('.auth-tab');
+  if (!tab) return;
+  authTab = tab.dataset.tab;
+  document.querySelectorAll('.auth-tab').forEach(t => t.classList.remove('active'));
+  tab.classList.add('active');
+  document.getElementById('loginForm').style.display = authTab === 'login' ? '' : 'none';
+  document.getElementById('registerForm').style.display = authTab === 'register' ? '' : 'none';
+  document.getElementById('loginError').textContent = '';
+  document.getElementById('regError').textContent = '';
+});
+
+// 登录类型切换
+document.getElementById('loginTypeRow').addEventListener('click', function(e) {
+  const btn = e.target.closest('.auth-type-btn');
+  if (!btn) return;
+  loginType = btn.dataset.type;
+  document.querySelectorAll('#loginTypeRow .auth-type-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  const input = document.getElementById('loginAccount');
+  if (loginType === 'phone') input.placeholder = '请输入手机号';
+  else if (loginType === 'email') input.placeholder = '请输入邮箱';
+  else if (loginType === 'wechat') input.placeholder = '请输入微信绑定的手机号/邮箱';
+  else if (loginType === 'qq') input.placeholder = '请输入QQ绑定的手机号/邮箱';
+  // 验证码登录只支持手机号/邮箱
+  const codeGroup = document.getElementById('loginCodeGroup');
+  const pwdGroup = document.getElementById('loginPwdGroup');
+  if (loginType === 'wechat' || loginType === 'qq') {
+    codeGroup.style.display = 'none';
+    pwdGroup.style.display = '';
+  }
+});
+
+// 注册类型切换
+document.getElementById('registerTypeRow').addEventListener('click', function(e) {
+  const btn = e.target.closest('.auth-type-btn');
+  if (!btn) return;
+  registerType = btn.dataset.type;
+  document.querySelectorAll('#registerTypeRow .auth-type-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  const input = document.getElementById('regAccount');
+  input.placeholder = registerType === 'phone' ? '请输入手机号' : '请输入邮箱';
+});
+
+// 获取验证码（登录）
+document.getElementById('loginCodeBtn').addEventListener('click', function() {
+  if (codeCountdown > 0) return;
+  const account = document.getElementById('loginAccount').value.trim();
+  const err = validateAccount(account, loginType);
+  if (err) { document.getElementById('loginError').textContent = err; return; }
+  // 检查账号是否存在（验证码登录需要已注册）
+  const accounts = getAccounts();
+  if (!accounts[account]) {
+    document.getElementById('loginError').textContent = '该账号未注册';
+    return;
+  }
+  sendVerificationCode(account, 'loginCodeBtn', 'loginError');
+});
+
+// 获取验证码（注册）
+document.getElementById('regCodeBtn').addEventListener('click', function() {
+  if (codeCountdown > 0) return;
+  const account = document.getElementById('regAccount').value.trim();
+  const err = validateAccount(account, registerType);
+  if (err) { document.getElementById('regError').textContent = err; return; }
+  const accounts = getAccounts();
+  if (accounts[account]) {
+    document.getElementById('regError').textContent = '该账号已注册，请直接登录';
+    return;
+  }
+  sendVerificationCode(account, 'regCodeBtn', 'regError');
+});
+
+function sendVerificationCode(account, btnId, errorId) {
+  const code = generateCode();
+  generatedCodes[account] = code;
+  // 模拟发送：在控制台打印，实际项目中对接短信/邮件服务
+  console.log('[验证码] ' + account + ' 的验证码是: ' + code);
+  showToast('验证码已发送（测试环境显示在控制台）');
+
+  codeCountdown = 60;
+  const btn = document.getElementById(btnId);
+  btn.disabled = true;
+  btn.textContent = codeCountdown + 's';
+  if (codeTimer) clearInterval(codeTimer);
+  codeTimer = setInterval(function() {
+    codeCountdown--;
+    if (codeCountdown <= 0) {
+      clearInterval(codeTimer);
+      btn.disabled = false;
+      btn.textContent = '获取验证码';
+    } else {
+      btn.textContent = codeCountdown + 's';
+    }
+  }, 1000);
+}
+
+// 登录提交
+document.getElementById('loginSubmitBtn').addEventListener('click', async function() {
+  const account = document.getElementById('loginAccount').value.trim();
+  const password = document.getElementById('loginPassword').value;
+  const code = document.getElementById('loginCode').value.trim();
+  const errEl = document.getElementById('loginError');
+  errEl.textContent = '';
+
+  const accErr = validateAccount(account, loginType);
+  if (accErr) { errEl.textContent = accErr; return; }
+
+  const accounts = getAccounts();
+  if (!accounts[account]) { errEl.textContent = '该账号未注册'; return; }
+
+  // 如果用验证码登录
+  if (code && code.length === 6) {
+    if (generatedCodes[account] !== code) { errEl.textContent = '验证码错误'; return; }
+  } else {
+    // 密码登录
+    const pwdErr = validatePassword(password);
+    if (pwdErr) { errEl.textContent = pwdErr; return; }
+    if (accounts[account].password !== password) { errEl.textContent = '密码错误'; return; }
+  }
+
+  // 登录成功
+  const user = { id: accounts[account].id, account: account, type: accounts[account].type, password: accounts[account].password };
+  await onAuthSuccess(user);
+});
+
+// 注册提交
+document.getElementById('registerSubmitBtn').addEventListener('click', async function() {
+  const account = document.getElementById('regAccount').value.trim();
+  const code = document.getElementById('regCode').value.trim();
+  const password = document.getElementById('regPassword').value;
+  const password2 = document.getElementById('regPassword2').value;
+  const errEl = document.getElementById('regError');
+  errEl.textContent = '';
+
+  const accErr = validateAccount(account, registerType);
+  if (accErr) { errEl.textContent = accErr; return; }
+  if (generatedCodes[account] !== code) { errEl.textContent = '验证码错误'; return; }
+  const pwdErr = validatePassword(password);
+  if (pwdErr) { errEl.textContent = pwdErr; return; }
+  if (password !== password2) { errEl.textContent = '两次密码不一致'; return; }
+
+  const accounts = getAccounts();
+  if (accounts[account]) { errEl.textContent = '该账号已注册'; return; }
+
+  const userId = 'user_' + Date.now();
+  accounts[account] = {
+    id: userId,
+    account: account,
+    type: registerType,
+    password: password,
+    createdAt: new Date().toISOString()
+  };
+  saveAccounts(accounts);
+
+  const user = { id: userId, account: account, type: registerType, password: password };
+  await onAuthSuccess(user);
+  // 立即备份当前数据到新账户
+  await backupToFile();
+  showToast('注册成功，数据已自动备份！');
+});
+
+// 忘记密码
+document.getElementById('forgotPwdBtn').addEventListener('click', function() {
+  const account = document.getElementById('loginAccount').value.trim();
+  if (!account) { showToast('请先输入手机号或邮箱'); return; }
+  const accounts = getAccounts();
+  if (!accounts[account]) { showToast('该账号未注册'); return; }
+  // 简化：发送验证码重置
+  showModal({
+    title: '找回密码',
+    bodyHTML: '<p style="margin-bottom:12px;color:var(--text-dim);font-size:14px;">验证码将发送到 ' + maskAccount(account) + '</p>' +
+      '<div class="auth-input-group"><input type="text" class="auth-input" id="resetCode" placeholder="验证码" maxlength="6" style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:10px;padding:12px 14px;color:var(--text);width:100%;margin-bottom:10px;"></div>' +
+      '<div class="auth-input-group"><input type="password" class="auth-input" id="resetPwd" placeholder="新密码（6-20位）" style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:10px;padding:12px 14px;color:var(--text);width:100%;"></div>',
+    buttons: [
+      { text: '取消', value: null, style: 'cancel' },
+      { text: '重置', style: 'confirm', onClick: function() {
+        const code = document.getElementById('resetCode').value.trim();
+        const newPwd = document.getElementById('resetPwd').value;
+        if (code !== generatedCodes[account]) { showToast('验证码错误'); return false; }
+        if (validatePassword(newPwd)) { showToast(validatePassword(newPwd)); return false; }
+        const accs = getAccounts();
+        if (accs[account]) {
+          accs[account].password = newPwd;
+          saveAccounts(accs);
+          showToast('密码重置成功');
+          return true;
+        }
+        return false;
+      }}
+    ]
+  });
+  // 发送验证码
+  generatedCodes[account] = generateCode();
+  console.log('[重置密码验证码]', account, generatedCodes[account]);
+});
+
+// 游客模式
+document.getElementById('guestBtn').addEventListener('click', async function() {
+  setCurrentUser(null);
+  updateAccountUI();
+  await loadAndInit();
+  hideAuthScreen();
+  showToast('已进入游客模式，数据仅保存在本地');
+});
+
+// 从设置页登录
+document.getElementById('loginFromSettingsBtn').addEventListener('click', function() {
+  closeSettings();
+  showAuthScreen();
+});
+
+// 退出登录
+document.getElementById('logoutBtn').addEventListener('click', async function() {
+  const confirmed = await showModal({
+    title: '退出登录',
+    bodyHTML: '退出登录后将返回登录界面，当前账户数据已备份。确定退出吗？',
+    buttons: [
+      { text: '取消', value: false, style: 'cancel' },
+      { text: '退出', value: true, style: 'danger' }
+    ]
+  });
+  if (!confirmed) return;
+  // 退出前备份一次
+  await backupToFile();
+  setCurrentUser(null);
+  currentUser = null;
+  // 重置数据
+  tracks = [];
+  categories = [];
+  currentIndex = 0;
+  isPlaying = false;
+  if (audio) audio.pause();
+  updateAccountUI();
+  closeSettings();
+  showAuthScreen();
+});
+
+// 切换账号
+document.getElementById('switchAccountBtn').addEventListener('click', async function() {
+  await backupToFile();
+  setCurrentUser(null);
+  currentUser = null;
+  // 重置数据
+  tracks = [];
+  categories = [];
+  currentIndex = 0;
+  isPlaying = false;
+  if (audio) audio.pause();
+  updateAccountUI();
+  closeSettings();
+  showAuthScreen();
+});
+
+// 手动备份
+document.getElementById('manualBackupBtn').addEventListener('click', async function() {
+  showToast('正在备份...');
+  const ok = await backupToFile();
+  if (ok) showToast('备份成功！');
+  else showToast('备份失败');
+});
+
+// 更新账户UI
+function updateAccountUI() {
+  const loggedInEl = document.getElementById('accountLoggedIn');
+  const loggedOutEl = document.getElementById('accountLoggedOut');
+  if (currentUser) {
+    loggedInEl.style.display = '';
+    loggedOutEl.style.display = 'none';
+    document.getElementById('accountNameDisplay').textContent = maskAccount(currentUser.account);
+    document.getElementById('accountTypeLabel').textContent = getTypeLabel(currentUser.type) + '账户';
+    const avatar = document.getElementById('accountAvatar');
+    avatar.textContent = currentUser.account ? currentUser.account[0].toUpperCase() : '♪';
+    document.getElementById('syncStatusText').textContent = '数据已同步备份';
+  } else {
+    loggedInEl.style.display = 'none';
+    loggedOutEl.style.display = '';
+  }
+}
+
+// ==================== 自动备份到公共存储 ====================
+function getBackupFileName(account) {
+  return 'yingu_backup_' + account.replace(/[^a-zA-Z0-9]/g, '_') + '.json';
+}
+
+async function backupToFile() {
+  try {
+    // 序列化完整数据（包含音频文件base64）
+    const fullData = await serializeFullData();
+    const jsonStr = JSON.stringify(fullData);
+
+    if (window.cordova && window.resolveLocalFileSystemURL) {
+      const possiblePaths = [
+        cordova.file.externalRootDirectory,
+        cordova.file.externalDataDirectory,
+        cordova.file.documentsDirectory,
+        cordova.file.dataDirectory
+      ].filter(Boolean);
+
+      for (const basePath of possiblePaths) {
+        try {
+          const dirEntry = await new Promise(function(resolve, reject) {
+            window.resolveLocalFileSystemURL(basePath, resolve, reject);
+          });
+          // 尝试创建/进入备份目录
+          let backupDir;
+          try {
+            backupDir = await new Promise(function(resolve, reject) {
+              dirEntry.getDirectory(BACKUP_DIR, { create: true }, resolve, reject);
+            });
+          } catch(e) {
+            backupDir = dirEntry; // 没有权限创建目录则用根目录
+          }
+          const fileName = currentUser ? getBackupFileName(currentUser.account) : 'yingu_backup_guest.json';
+          const fileEntry = await new Promise(function(resolve, reject) {
+            backupDir.getFile(fileName, { create: true, exclusive: false }, resolve, reject);
+          });
+          const writer = await new Promise(function(resolve, reject) {
+            fileEntry.createWriter(resolve, reject);
+          });
+          await new Promise(function(resolve, reject) {
+            writer.onwriteend = resolve;
+            writer.onerror = reject;
+            writer.write(new Blob([jsonStr], { type: 'application/json' }));
+          });
+          console.log('[备份] 成功:', fileName);
+          return true;
+        } catch(e) {
+          console.warn('[备份] 路径失败:', basePath, e.message);
+        }
+      }
+    }
+    // 浏览器/非Cordova环境也存一份到localStorage作为备份
+    try { localStorage.setItem('yingu_full_backup', jsonStr); } catch(e) {}
+    return true;
+  } catch(e) {
+    console.error('[备份] 失败:', e);
+    return false;
+  }
+}
+
+async function restoreFromBackup(account) {
+  try {
+    let raw = null;
+    const fileName = account ? getBackupFileName(account) : 'yingu_backup_guest.json';
+
+    if (window.cordova && window.resolveLocalFileSystemURL) {
+      const possiblePaths = [
+        cordova.file.externalRootDirectory,
+        cordova.file.externalDataDirectory,
+        cordova.file.documentsDirectory,
+        cordova.file.dataDirectory
+      ].filter(Boolean);
+
+      for (const basePath of possiblePaths) {
+        try {
+          const dirEntry = await new Promise(function(resolve, reject) {
+            window.resolveLocalFileSystemURL(basePath, resolve, reject);
+          });
+          // 先尝试备份子目录
+          let backupDir = dirEntry;
+          try {
+            backupDir = await new Promise(function(resolve) {
+              dirEntry.getDirectory(BACKUP_DIR, { create: false }, resolve, function() { resolve(dirEntry); });
+            });
+          } catch(e) {}
+          const fileEntry = await new Promise(function(resolve, reject) {
+            backupDir.getFile(fileName, { create: false }, resolve, reject);
+          });
+          const file = await new Promise(function(resolve, reject) {
+            fileEntry.file(resolve, reject);
+          });
+          raw = await new Promise(function(resolve, reject) {
+            const reader = new FileReader();
+            reader.onloadend = function() { resolve(this.result); };
+            reader.onerror = reject;
+            reader.readAsText(file);
+          });
+          if (raw) break;
+        } catch(e) {}
+      }
+    }
+
+    if (!raw) {
+      try { raw = localStorage.getItem('yingu_full_backup'); } catch(e) {}
+    }
+
+    if (!raw) {
+      console.log('[恢复] 未找到备份文件');
+      return false;
+    }
+
+    const data = JSON.parse(raw);
+    if (!data || !data.tracks) return false;
+
+    // 恢复数据（复用导入逻辑）
+    await restoreDataFromObject(data);
+    console.log('[恢复] 成功，共', data.tracks ? data.tracks.length : 0, '首曲目');
+    return true;
+  } catch(e) {
+    console.error('[恢复] 失败:', e);
+    return false;
+  }
+}
+
+// 序列化完整数据（用于备份/导出）
+async function serializeFullData() {
+  const exportTracks = [];
+  for (let i = 0; i < tracks.length; i++) {
+    const t = tracks[i];
+    const item = {
+      id: t.id,
+      name: t.name,
+      type: t.type || 'audio',
+      categoryId: t.categoryId || 'cat-0'
+    };
+    let source = null;
+    if (t.src && t.src.startsWith('blob:')) {
+      source = t.src;
+    } else if (t._fileKey) {
+      source = 'idb:' + t._fileKey;
+    } else if (t.src && t.src.startsWith('idb:')) {
+      source = t.src;
+    } else if (t.src && (t.src.startsWith('http:') || t.src.startsWith('https:') || t.src.startsWith('file:'))) {
+      item.src = t.src;
+      exportTracks.push(item);
+      continue;
+    }
+    if (source) {
+      const base64 = await anySourceToBase64(source);
+      if (base64) item.srcData = base64;
+      else if (t.src && !t.src.startsWith('blob:') && !t.src.startsWith('idb:')) item.src = t.src;
+    } else if (t.src && !t.src.startsWith('blob:') && !t.src.startsWith('idb:')) {
+      item.src = t.src;
+    }
+    exportTracks.push(item);
+  }
+
+  async function procImgs(imgList) {
+    const result = [];
+    for (const img of imgList) {
+      if (!img) continue;
+      if (isRemoteUrl(img)) { result.push({ src: getRemoteUrl(img) }); continue; }
+      const b64 = await anySourceToBase64(img);
+      if (b64) result.push({ srcData: b64 });
+      else if (typeof img === 'string' && img.length > 0 && !img.startsWith('blob:') && !img.startsWith('idb:')) result.push({ src: img });
+      else if (typeof img === 'object' && img.url && !img.url.startsWith('blob:') && !img.url.startsWith('idb:')) result.push({ src: img.url });
+    }
+    return result;
+  }
+
+  return {
+    app: '音轨',
+    version: '2.2.1',
+    exportDate: new Date().toISOString(),
+    account: currentUser ? currentUser.account : 'guest',
+    tracks: exportTracks,
+    categories: JSON.parse(JSON.stringify(categories)),
+    settings: {
+      bgColor: settings.bgColor, recordColor: settings.recordColor, labelColor: settings.labelColor,
+      bgOpacity: settings.bgOpacity, recordOpacity: settings.recordOpacity, labelOpacity: settings.labelOpacity,
+      bgOpacityImage: settings.bgOpacityImage, recordOpacityImage: settings.recordOpacityImage, labelOpacityImage: settings.labelOpacityImage,
+      bgImageIndex: settings.bgImageIndex, recordImageIndex: settings.recordImageIndex, labelImageIndex: settings.labelImageIndex,
+      bgImages: await procImgs(settings.bgImages),
+      recordImages: await procImgs(settings.recordImages),
+      labelImages: await procImgs(settings.labelImages)
+    },
+    currentCategoryId: currentCategoryId,
+    currentIndex: currentIndex,
+    playMode: playMode,
+    nextTrackId: nextTrackId,
+    nextCategoryId: nextCategoryId
+  };
+}
+
+// 从数据对象恢复（用于导入/备份恢复）
+async function restoreDataFromObject(data) {
+  pause();
+  if (currentMedia) {
+    try { currentMedia.pause(); } catch(e) {}
+    currentMedia.src = '';
+    try { currentMedia.load(); } catch(e) {}
+  }
+
+  // 释放旧URL
+  function revokeOld(list) {
+    if (!list) return;
+    for (const item of list) {
+      if (typeof item === 'string' && item.startsWith('blob:')) { try { URL.revokeObjectURL(item); } catch(e) {} }
+      else if (typeof item === 'object' && item && item.url && item.url.startsWith('blob:')) { try { URL.revokeObjectURL(item.url); } catch(e) {} }
+    }
+  }
+  revokeOld(tracks.map(function(t) { return t.src; }));
+  revokeOld(settings.bgImages);
+  revokeOld(settings.recordImages);
+  revokeOld(settings.labelImages);
+
+  await openDB();
+
+  // 恢复tracks
+  const newTracks = [];
+  if (data.tracks && Array.isArray(data.tracks)) {
+    for (let i = 0; i < data.tracks.length; i++) {
+      const t = data.tracks[i];
+      let src = '';
+      let fileKey = null;
+      if (t.srcData && t.srcData.startsWith('data:')) {
+        const restored = await base64ToBlobStoreAndUrl(t.srcData, (t.type === 'video' ? 'video-bak' : 'audio-bak'));
+        if (restored) { src = restored.url; fileKey = restored.fileKey; }
+      } else if (t.src && (t.src.startsWith('http:') || t.src.startsWith('https:') || t.src.startsWith('file:'))) {
+        src = t.src;
+      }
+      newTracks.push({
+        id: t.id != null ? t.id : nextTrackId++,
+        name: t.name || '未命名',
+        src: src,
+        type: t.type || 'audio',
+        categoryId: t.categoryId || 'cat-0',
+        _fileKey: fileKey
+      });
+    }
+  }
+  tracks = newTracks;
+
+  // 恢复分类
+  if (data.categories && Array.isArray(data.categories) && data.categories.length > 0) {
+    const hasDefault = data.categories.some(function(c) { return c.id === 'cat-0'; });
+    const newCats = JSON.parse(JSON.stringify(data.categories));
+    if (!hasDefault) newCats.unshift({ id: 'cat-0', name: '默认' });
+    categories = newCats;
+    let maxCatId = 0;
+    for (const c of categories) {
+      if (c.id) {
+        const m = c.id.match(/cat-(\d+)/);
+        if (m) maxCatId = Math.max(maxCatId, parseInt(m[1]));
+      }
+    }
+    nextCategoryId = maxCatId + 1;
+  }
+
+  // 重置设置
+  settings.bgColor = '#0a0a0a'; settings.bgOpacity = 1.0;
+  settings.recordColor = '#030303'; settings.recordOpacity = 1.0;
+  settings.labelColor = '#c0392b'; settings.labelOpacity = 1.0;
+  settings.bgImages = []; settings.bgImageIndex = -1; settings.bgOpacityImage = 0.55;
+  settings.recordImages = []; settings.recordImageIndex = -1; settings.recordOpacityImage = 1.0;
+  settings.labelImages = []; settings.labelImageIndex = -1; settings.labelOpacityImage = 1.0;
+
+  if (data.settings) {
+    const s = data.settings;
+    if (s.bgColor) settings.bgColor = s.bgColor;
+    if (s.recordColor) settings.recordColor = s.recordColor;
+    if (s.labelColor) settings.labelColor = s.labelColor;
+    if (s.bgOpacity !== undefined) settings.bgOpacity = s.bgOpacity;
+    if (s.recordOpacity !== undefined) settings.recordOpacity = s.recordOpacity;
+    if (s.labelOpacity !== undefined) settings.labelOpacity = s.labelOpacity;
+    if (s.bgOpacityImage !== undefined) settings.bgOpacityImage = s.bgOpacityImage;
+    if (s.recordOpacityImage !== undefined) settings.recordOpacityImage = s.recordOpacityImage;
+    if (s.labelOpacityImage !== undefined) settings.labelOpacityImage = s.labelOpacityImage;
+
+    async function restoreImgs(imgList, prefix) {
+      const result = [];
+      if (!imgList || !Array.isArray(imgList)) return result;
+      for (const img of imgList) {
+        if (!img) continue;
+        if (img.srcData && img.srcData.startsWith('data:')) {
+          const restored = await base64ToBlobStoreAndUrl(img.srcData, prefix);
+          if (restored) result.push({ url: restored.url, _fileKey: restored.fileKey });
+        } else if (img.src && typeof img.src === 'string') {
+          if (img.src.startsWith('data:')) {
+            const restored = await base64ToBlobStoreAndUrl(img.src, prefix);
+            if (restored) result.push({ url: restored.url, _fileKey: restored.fileKey });
+          } else if (!img.src.startsWith('blob:') && !img.src.startsWith('idb:')) {
+            result.push(img.src);
+          }
+        }
+      }
+      return result;
+    }
+    settings.bgImages = await restoreImgs(s.bgImages, 'img-bg-bak');
+    settings.recordImages = await restoreImgs(s.recordImages, 'img-rec-bak');
+    settings.labelImages = await restoreImgs(s.labelImages, 'img-lbl-bak');
+
+    if (s.bgImageIndex !== undefined) settings.bgImageIndex = (s.bgImageIndex >= 0 && s.bgImageIndex < settings.bgImages.length) ? s.bgImageIndex : -1;
+    if (s.recordImageIndex !== undefined) settings.recordImageIndex = (s.recordImageIndex >= 0 && s.recordImageIndex < settings.recordImages.length) ? s.recordImageIndex : -1;
+    if (s.labelImageIndex !== undefined) settings.labelImageIndex = (s.labelImageIndex >= 0 && s.labelImageIndex < settings.labelImages.length) ? s.labelImageIndex : -1;
+  }
+
+  if (data.currentCategoryId && categories.some(function(c) { return c.id === data.currentCategoryId; })) currentCategoryId = data.currentCategoryId;
+  else currentCategoryId = 'cat-0';
+  if (data.playMode) playMode = data.playMode;
+  if (data.nextTrackId && typeof data.nextTrackId === 'number' && data.nextTrackId > tracks.length) nextTrackId = data.nextTrackId;
+  else {
+    let maxId = 0;
+    for (const t of tracks) { if (t.id && typeof t.id === 'number' && t.id > maxId) maxId = t.id; }
+    nextTrackId = maxId + 1;
+  }
+  if (data.currentIndex !== undefined && data.currentIndex >= 0 && data.currentIndex < tracks.length) currentIndex = data.currentIndex;
+  else currentIndex = 0;
+  isPlaying = false;
+
+  applySettings();
+  renderCategoryBar();
+  renderSettingsColors();
+  updateAccountUI();
+  if (playMode === 'shuffle') {
+    modeText.textContent = '随机播放';
+    modeDot1.classList.add('active');
+    modeDot2.classList.add('active');
+  } else {
+    modeText.textContent = '顺序播放';
+    modeDot1.classList.remove('active');
+    modeDot2.classList.remove('active');
+  }
+  if (tracks.length > 0) loadTrack(currentIndex);
+  else { labelText.textContent = '音轨'; currentIndex = 0; }
+  updateTrackList();
+  saveAllData();
+}
+
+// ==================== 多选导出 ====================
+let exportSelectedTracks = new Set();
+let exportIncludeSettings = true;
+let exportIncludeCategories = true;
+
+document.getElementById('exportBtn').addEventListener('click', function() {
+  if (tracks.length === 0 && categories.length <= 1 && settings.bgImages.length === 0) {
+    showToast('暂无数据可导出');
+    return;
+  }
+  showExportDialog();
+});
+
+function showExportDialog() {
+  exportSelectedTracks = new Set();
+  exportIncludeSettings = true;
+  exportIncludeCategories = true;
+
+  // 构建曲目列表HTML
+  let trackListHTML = '';
+  const filtered = getFilteredTrackIndices();
+  filtered.forEach(function(trackIdx, displayIdx) {
+    const t = tracks[trackIdx];
+    trackListHTML += '<div class="export-track-item" data-track-idx="' + trackIdx + '">' +
+      '<div class="export-track-check"></div>' +
+      '<span class="export-track-name">' + escapeHtml(t.name) + '</span>' +
+    '</div>';
+  });
+
+  // 如果在"全部"分类，显示所有曲目
+  let allTracksHTML = '';
+  if (currentCategoryId !== 'cat-0' || true) {
+    tracks.forEach(function(t, idx) {
+      // 避免重复
+      if (filtered.indexOf(idx) === -1) {
+        allTracksHTML += '<div class="export-track-item" data-track-idx="' + idx + '">' +
+          '<div class="export-track-check"></div>' +
+          '<span class="export-track-name">' + escapeHtml(t.name) + ' <span style="color:var(--text-dim);font-size:12px;">(' + (categories.find(function(c){return c.id===t.categoryId;})?.name || '') + ')</span></span>' +
+        '</div>';
+      }
+    });
+  }
+
+  const bodyHTML =
+    '<div class="export-section-title">选择音频</div>' +
+    '<div class="export-select-row">' +
+      '<div class="export-select-btn" id="expSelectAll">全选</div>' +
+      '<div class="export-select-btn" id="expSelectNone">全不选</div>' +
+      '<div class="export-select-btn" id="expSelectAllCat">全部分类</div>' +
+    '</div>' +
+    '<div class="export-track-list" id="expTrackList">' +
+      trackListHTML +
+      (allTracksHTML ? '<div style="padding:8px 14px;color:var(--text-dim);font-size:12px;border-top:1px solid rgba(255,255,255,0.06);">其他分类：</div>' + allTracksHTML : '') +
+    '</div>' +
+    '<div class="export-section-title">其他数据</div>' +
+    '<div class="export-option-row">' +
+      '<div class="export-checkbox checked" id="expCheckCategories"></div>' +
+      '<span class="export-option-label">分类数据</span>' +
+    '</div>' +
+    '<div class="export-option-row">' +
+      '<div class="export-checkbox checked" id="expCheckSettings"></div>' +
+      '<span class="export-option-label">自定义设置（颜色、图片、透明度等）</span>' +
+    '</div>';
+
+  showModal({
+    title: '选择导出内容',
+    bodyHTML: bodyHTML,
+    buttons: [
+      { text: '取消', value: null, style: 'cancel' },
+      { text: '导出', style: 'confirm', onClick: doExport }
+    ]
+  });
+
+  // 绑定事件（modal插入DOM后）
+  setTimeout(function() {
+    // 曲目选择
+    document.getElementById('expTrackList').addEventListener('click', function(e) {
+      const item = e.target.closest('.export-track-item');
+      if (!item) return;
+      const idx = parseInt(item.dataset.trackIdx);
+      if (exportSelectedTracks.has(idx)) {
+        exportSelectedTracks.delete(idx);
+        item.classList.remove('checked');
+      } else {
+        exportSelectedTracks.add(idx);
+        item.classList.add('checked');
+      }
+    });
+    // 全选
+    document.getElementById('expSelectAll').addEventListener('click', function() {
+      document.querySelectorAll('#expTrackList .export-track-item').forEach(function(item) {
+        const idx = parseInt(item.dataset.trackIdx);
+        exportSelectedTracks.add(idx);
+        item.classList.add('checked');
+      });
+    });
+    // 全不选
+    document.getElementById('expSelectNone').addEventListener('click', function() {
+      exportSelectedTracks.clear();
+      document.querySelectorAll('#expTrackList .export-track-item').forEach(function(item) {
+        item.classList.remove('checked');
+      });
+    });
+    // 全选当前分类
+    document.getElementById('expSelectAllCat').addEventListener('click', function() {
+      filtered.forEach(function(idx) {
+        exportSelectedTracks.add(idx);
+      });
+      document.querySelectorAll('#expTrackList .export-track-item').forEach(function(item) {
+        const idx = parseInt(item.dataset.trackIdx);
+        if (exportSelectedTracks.has(idx)) item.classList.add('checked');
+      });
+    });
+    // 复选框
+    document.getElementById('expCheckCategories').addEventListener('click', function() {
+      exportIncludeCategories = !exportIncludeCategories;
+      this.classList.toggle('checked', exportIncludeCategories);
+    });
+    document.getElementById('expCheckSettings').addEventListener('click', function() {
+      exportIncludeSettings = !exportIncludeSettings;
+      this.classList.toggle('checked', exportIncludeSettings);
+    });
+  }, 100);
+}
+
+async function doExport() {
+  const selectedIndices = Array.from(exportSelectedTracks);
+  if (selectedIndices.length === 0 && !exportIncludeSettings && !exportIncludeCategories) {
+    showToast('请选择要导出的内容');
+    return false;
+  }
+
+  showToast('正在导出，请稍候...');
+
+  try {
+    // 构建导出数据
+    const exportTracks = [];
+    for (const idx of selectedIndices) {
+      const t = tracks[idx];
+      if (!t) continue;
+      const item = {
+        id: t.id,
+        name: t.name,
+        type: t.type || 'audio',
+        categoryId: t.categoryId || 'cat-0'
+      };
+      let source = null;
+      if (t.src && t.src.startsWith('blob:')) source = t.src;
+      else if (t._fileKey) source = 'idb:' + t._fileKey;
+      else if (t.src && t.src.startsWith('idb:')) source = t.src;
+      else if (t.src && !t.src.startsWith('blob:') && !t.src.startsWith('idb:')) { item.src = t.src; exportTracks.push(item); continue; }
+      if (source) {
+        const b64 = await anySourceToBase64(source);
+        if (b64) item.srcData = b64;
+        else if (t.src && !t.src.startsWith('blob:') && !t.src.startsWith('idb:')) item.src = t.src;
+      }
+      exportTracks.push(item);
+    }
+
+    async function procImgs(imgList) {
+      const result = [];
+      for (const img of imgList) {
+        if (!img) continue;
+        if (isRemoteUrl(img)) { result.push({ src: getRemoteUrl(img) }); continue; }
+        const b64 = await anySourceToBase64(img);
+        if (b64) result.push({ srcData: b64 });
+      }
+      return result;
+    }
+
+    const exportData = {
+      app: '音轨',
+      version: '2.2.1',
+      exportDate: new Date().toISOString(),
+      account: currentUser ? currentUser.account : 'guest',
+      tracks: exportTracks,
+      categories: exportIncludeCategories ? JSON.parse(JSON.stringify(categories)) : [{ id: 'cat-0', name: '默认' }],
+      settings: exportIncludeSettings ? {
+        bgColor: settings.bgColor, recordColor: settings.recordColor, labelColor: settings.labelColor,
+        bgOpacity: settings.bgOpacity, recordOpacity: settings.recordOpacity, labelOpacity: settings.labelOpacity,
+        bgOpacityImage: settings.bgOpacityImage, recordOpacityImage: settings.recordOpacityImage, labelOpacityImage: settings.labelOpacityImage,
+        bgImageIndex: settings.bgImageIndex, recordImageIndex: settings.recordImageIndex, labelImageIndex: settings.labelImageIndex,
+        bgImages: await procImgs(settings.bgImages),
+        recordImages: await procImgs(settings.recordImages),
+        labelImages: await procImgs(settings.labelImages)
+      } : null,
+      currentCategoryId: currentCategoryId,
+      currentIndex: 0,
+      playMode: playMode
+    };
+
+    const jsonStr = JSON.stringify(exportData);
+    const fileName = '音轨_导出_' + new Date().toISOString().slice(0,10) + '_' + new Date().toISOString().slice(11,16).replace(':','') + '.json';
+
+    let saved = false;
+    if (window.cordova && window.resolveLocalFileSystemURL) {
+      const possiblePaths = [
+        cordova.file.externalRootDirectory,
+        cordova.file.externalDataDirectory,
+        cordova.file.documentsDirectory,
+        cordova.file.dataDirectory
+      ].filter(Boolean);
+      for (const basePath of possiblePaths) {
+        try {
+          const dirEntry = await new Promise(function(resolve, reject) {
+            window.resolveLocalFileSystemURL(basePath, resolve, reject);
+          });
+          let backupDir = dirEntry;
+          try {
+            backupDir = await new Promise(function(resolve) {
+              dirEntry.getDirectory(BACKUP_DIR, { create: true }, resolve, function() { resolve(dirEntry); });
+            });
+          } catch(e) {}
+          const fileEntry = await new Promise(function(resolve, reject) {
+            backupDir.getFile(fileName, { create: true, exclusive: false }, resolve, reject);
+          });
+          const writer = await new Promise(function(resolve, reject) {
+            fileEntry.createWriter(resolve, reject);
+          });
+          await new Promise(function(resolve, reject) {
+            writer.onwriteend = resolve;
+            writer.onerror = reject;
+            writer.write(new Blob([jsonStr], { type: 'application/json' }));
+          });
+          showToast('导出成功！已保存' + (selectedIndices.length > 0 ? selectedIndices.length + '首音频' : ''));
+          saved = true;
+          break;
+        } catch(e) {}
+      }
+    }
+    if (!saved) {
+      const blob = new Blob([jsonStr], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(function() { URL.revokeObjectURL(url); }, 5000);
+      showToast('导出成功！');
+    }
+    return true;
+  } catch(e) {
+    console.error('导出失败:', e);
+    showToast('导出失败：' + (e.message || e));
+    return false;
+  }
+}
+
+// ==================== 启动检查 ====================
+async function checkAuthAndInit() {
+  const user = getCurrentUser();
+  if (user) {
+    currentUser = user;
+    updateAccountUI();
+    // 先尝试从备份恢复（覆盖本地数据）
+    try {
+      const restored = await restoreFromBackup(user.account);
+      if (restored) {
+        showToast('数据已从账户备份恢复');
+      }
+    } catch(e) {
+      console.warn('恢复备份失败:', e);
+    }
+    // 加载数据并初始化UI
+    await loadAndInit();
+    hideAuthScreen();
+  } else {
+    // 检查是否有本地数据（游客模式）
+    const lsData = localStorage.getItem(LS_KEY);
+    if (lsData) {
+      // 有本地数据，进入游客模式
+      updateAccountUI();
+      await loadAndInit();
+      hideAuthScreen();
+    } else {
+      // 无数据，显示登录/注册界面
+      showAuthScreen();
+    }
+  }
+}
+
+// 登录/注册成功后调用
+async function onAuthSuccess(user) {
+  setCurrentUser(user);
+  currentUser = user;
+  updateAccountUI();
+  // 尝试从备份恢复数据
+  try {
+    const restored = await restoreFromBackup(user.account);
+    if (restored) {
+      showToast('数据已从账户备份恢复');
+    }
+  } catch(e) {}
+  // 加载数据并初始化UI
+  await loadAndInit();
+  hideAuthScreen();
+  showToast('登录成功，欢迎回来！');
+}
+
+// 覆盖原来的 saveAllData，加入自动备份
+const _origSaveAllData = saveAllData;
+let _backupTimer = null;
+saveAllData = function() {
+  _origSaveAllData();
+  // 已登录用户：防抖自动备份（3秒后）
+  if (currentUser) {
+    if (_backupTimer) clearTimeout(_backupTimer);
+    _backupTimer = setTimeout(function() {
+      backupToFile();
+    }, 3000);
+  }
+};
+
+// 页面隐藏时立即备份
+const _origBeforeUnload = window.onbeforeunload;
+window.addEventListener('beforeunload', function() {
+  if (currentUser) {
+    backupToFile();
+  }
+});
+document.addEventListener('pause', function() {
+  if (currentUser) {
+    backupToFile();
+  }
+}, false);
+
+</script>
+</body>
+</html>
