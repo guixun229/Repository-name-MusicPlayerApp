@@ -2003,29 +2003,147 @@ document.getElementById('labelImgOpacitySlider').addEventListener('input', e => 
 
 // ==================== 导出/导入功能 ====================
 
-// 辅助函数：将 blob URL 转换为 base64
-async function blobUrlToBase64(url) {
+// 辅助函数：将 Blob/File 对象转换为 base64 data URL
+function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+}
+
+// 辅助函数：从 blob URL 获取 Blob 对象
+async function fetchBlobFromUrl(url) {
   try {
     const response = await fetch(url);
-    const blob = await response.blob();
-    return new Promise((resolve) => {
-      const reader = new FileReader();
-      reader.onloadend = () => resolve(reader.result);
-      reader.readAsDataURL(blob);
-    });
+    if (!response.ok) throw new Error('fetch failed');
+    return await response.blob();
   } catch (e) {
-    console.warn('blob转base64失败:', e);
     return null;
   }
 }
 
-// 辅助函数：将 base64 还原为 blob 并存入 IndexedDB
-async function base64ToBlobAndStore(dataUrl, fileKey) {
+// 辅助函数：从各种来源（blob URL、idb:key、fileKey）获取 Blob 并转为 base64
+// source 可以是: blob URL 字符串, 'idb:xxx' 格式字符串, 或 {_fileKey: 'xxx'} 对象
+async function anySourceToBase64(source) {
+  if (!source) return null;
+
+  // 情况1: 已经是 data URL，直接返回
+  if (typeof source === 'string' && source.startsWith('data:')) {
+    return source;
+  }
+
+  let blob = null;
+
+  // 情况2: blob URL 字符串
+  if (typeof source === 'string' && source.startsWith('blob:')) {
+    blob = await fetchBlobFromUrl(source);
+    if (blob) {
+      try { return await blobToBase64(blob); } catch(e) {}
+    }
+    // blob URL 获取失败，继续尝试其他方式
+  }
+
+  // 情况3: 'idb:xxx' 格式
+  if (typeof source === 'string' && source.startsWith('idb:')) {
+    const key = source.substring(4);
+    if (_db) {
+      try {
+        blob = await dbGet(key);
+        if (blob) {
+          try { return await blobToBase64(blob); } catch(e) {}
+        }
+      } catch(e) {}
+    }
+  }
+
+  // 情况4: 传入的是对象，有 _fileKey（用于图片等）
+  if (typeof source === 'object' && source !== null && source._fileKey) {
+    if (_db) {
+      try {
+        blob = await dbGet(source._fileKey);
+        if (blob) {
+          try { return await blobToBase64(blob); } catch(e) {}
+        }
+      } catch(e) {}
+    }
+    // 如果有 url 且是 blob:，再尝试从 url 获取
+    if (source.url && typeof source.url === 'string' && source.url.startsWith('blob:')) {
+      blob = await fetchBlobFromUrl(source.url);
+      if (blob) {
+        try { return await blobToBase64(blob); } catch(e) {}
+      }
+    }
+    // 如果有 url 且是 data:，直接返回
+    if (source.url && typeof source.url === 'string' && source.url.startsWith('data:')) {
+      return source.url;
+    }
+  }
+
+  // 情况5: 传入的是对象，只有 url（没有 _fileKey）
+  if (typeof source === 'object' && source !== null && source.url && typeof source.url === 'string') {
+    if (source.url.startsWith('blob:')) {
+      blob = await fetchBlobFromUrl(source.url);
+      if (blob) {
+        try { return await blobToBase64(blob); } catch(e) {}
+      }
+    } else if (source.url.startsWith('data:')) {
+      return source.url;
+    } else if (source.url.startsWith('http')) {
+      // 远程URL不转换，保留引用
+      return null;
+    }
+  }
+
+  return null;
+}
+
+// 辅助函数：判断一个值是否为远程URL（不需要嵌入base64）
+function isRemoteUrl(val) {
+  if (typeof val === 'string') {
+    return val.startsWith('http://') || val.startsWith('https://') || val.startsWith('file://');
+  }
+  if (typeof val === 'object' && val !== null && val.url && typeof val.url === 'string') {
+    return val.url.startsWith('http://') || val.url.startsWith('https://') || val.url.startsWith('file://');
+  }
+  return false;
+}
+
+// 辅助函数：获取远程URL字符串
+function getRemoteUrl(val) {
+  if (typeof val === 'string') return val;
+  if (typeof val === 'object' && val !== null && val.url) return val.url;
+  return '';
+}
+
+// 辅助函数：将 base64 data URL 还原为 Blob 并存入 IndexedDB，返回 {blob, fileKey, url}
+async function base64ToBlobStoreAndUrl(dataUrl, keyPrefix) {
   try {
-    const response = await fetch(dataUrl);
-    const blob = await response.blob();
-    await dbPut(fileKey, blob);
-    return blob;
+    // 从 data URL 提取 MIME 类型和 base64 数据
+    const match = dataUrl.match(/^data:([^;]+);base64,(.*)$/);
+    if (!match) return null;
+    const mimeType = match[1] || 'application/octet-stream';
+    const base64Data = match[2];
+
+    // 解码 base64
+    const byteChars = atob(base64Data);
+    const byteNumbers = new Array(byteChars.length);
+    for (let i = 0; i < byteChars.length; i++) {
+      byteNumbers[i] = byteChars.charCodeAt(i);
+    }
+    const byteArray = new Uint8Array(byteNumbers);
+    const blob = new Blob([byteArray], { type: mimeType });
+
+    // 存入 IndexedDB
+    const fileKey = keyPrefix + '-' + Date.now() + '-' + Math.random().toString(36).slice(2, 10);
+    if (_db) {
+      try { await dbPut(fileKey, blob); } catch(e) { console.warn('IndexedDB存储失败:', e); }
+    }
+
+    // 创建 blob URL
+    const url = URL.createObjectURL(blob);
+    return { blob, fileKey, url, mimeType };
   } catch (e) {
     console.warn('base64还原失败:', e);
     return null;
@@ -2034,49 +2152,74 @@ async function base64ToBlobAndStore(dataUrl, fileKey) {
 
 // 导出按钮
 document.getElementById('exportBtn').addEventListener('click', async function() {
-  if (tracks.length === 0 && settings.bgImages.length === 0 && settings.recordImages.length === 0 && settings.labelImages.length === 0) {
+  if (tracks.length === 0 && settings.bgImages.length === 0 && settings.recordImages.length === 0 && settings.labelImages.length === 0 && categories.length <= 1) {
     showToast('暂无数据可导出');
     return;
   }
 
-  showToast('正在导出...');
+  showToast('正在导出数据，请稍候...');
 
   try {
-    // 处理音频
+    // 处理音频 - 每首曲目都尝试从 blob URL 或 IndexedDB 获取完整数据
     const exportTracks = [];
-    for (const t of tracks) {
+    for (let i = 0; i < tracks.length; i++) {
+      const t = tracks[i];
       const item = {
         id: t.id,
         name: t.name,
         type: t.type || 'audio',
         categoryId: t.categoryId || 'cat-0'
       };
+
+      // 确定音频数据源：优先用 blob URL，失败则用 _fileKey 从 IndexedDB 读取
+      let source = null;
       if (t.src && t.src.startsWith('blob:')) {
-        const base64 = await blobUrlToBase64(t.src);
+        source = t.src;
+      } else if (t._fileKey) {
+        source = 'idb:' + t._fileKey;
+      } else if (t.src && t.src.startsWith('idb:')) {
+        source = t.src;
+      } else if (t.src && (t.src.startsWith('http:') || t.src.startsWith('https:') || t.src.startsWith('file:'))) {
+        // 远程URL直接保留
+        item.src = t.src;
+        exportTracks.push(item);
+        continue;
+      }
+
+      if (source) {
+        const base64 = await anySourceToBase64(source);
         if (base64) {
           item.srcData = base64;
-        } else {
+        } else if (t.src && !t.src.startsWith('blob:') && !t.src.startsWith('idb:')) {
           item.src = t.src;
         }
-      } else if (t.src) {
+      } else if (t.src && !t.src.startsWith('blob:') && !t.src.startsWith('idb:')) {
         item.src = t.src;
       }
+
       exportTracks.push(item);
     }
 
-    // 处理图片
+    // 处理图片列表 - 每张图片都从 blob URL 或 IndexedDB 获取
     async function processImagesToBase64(imgList) {
       const result = [];
       for (const img of imgList) {
-        let url = typeof img === 'string' ? img : (img && img.url ? img.url : '');
-        if (!url) continue;
-        if (url.startsWith('blob:')) {
-          const base64 = await blobUrlToBase64(url);
-          if (base64) {
-            result.push({ srcData: base64 });
-          }
-        } else {
-          result.push({ src: url });
+        if (!img) continue;
+
+        // 远程URL直接保留
+        if (isRemoteUrl(img)) {
+          result.push({ src: getRemoteUrl(img) });
+          continue;
+        }
+
+        // 尝试获取 base64
+        const base64 = await anySourceToBase64(img);
+        if (base64) {
+          result.push({ srcData: base64 });
+        } else if (typeof img === 'string' && img.length > 0 && !img.startsWith('blob:') && !img.startsWith('idb:')) {
+          result.push({ src: img });
+        } else if (typeof img === 'object' && img.url && typeof img.url === 'string' && !img.url.startsWith('blob:') && !img.url.startsWith('idb:')) {
+          result.push({ src: img.url });
         }
       }
       return result;
@@ -2086,13 +2229,13 @@ document.getElementById('exportBtn').addEventListener('click', async function() 
     const exportRecord = await processImagesToBase64(settings.recordImages);
     const exportLabel = await processImagesToBase64(settings.labelImages);
 
-    // 组装数据
+    // 组装完整数据 - 导出所有状态
     const exportData = {
       app: '音轨',
-      version: '1.2.1',
+      version: '2.2.1',
       exportDate: new Date().toISOString(),
       tracks: exportTracks,
-      categories: categories,
+      categories: JSON.parse(JSON.stringify(categories)),
       settings: {
         bgColor: settings.bgColor,
         recordColor: settings.recordColor,
@@ -2112,62 +2255,70 @@ document.getElementById('exportBtn').addEventListener('click', async function() 
       },
       currentCategoryId: currentCategoryId,
       currentIndex: currentIndex,
+      isPlaying: isPlaying,
       playMode: playMode,
       nextTrackId: nextTrackId,
       nextCategoryId: nextCategoryId
     };
 
-    const jsonStr = JSON.stringify(exportData, null, 2);
-    const fileName = `音轨_备份_${new Date().toISOString().slice(0, 10)}.json`;
+    const jsonStr = JSON.stringify(exportData);
+    const fileName = '音轨_完整备份_' + new Date().toISOString().slice(0, 10) + '.json';
 
     // 使用 Cordova 保存到手机存储
+    let saved = false;
     if (window.cordova && window.resolveLocalFileSystemURL) {
-      let savePath = cordova.file.externalRootDirectory || 
-                     cordova.file.externalDataDirectory || 
-                     cordova.file.dataDirectory || 
-                     cordova.file.filesDirectory;
+      const possiblePaths = [
+        cordova.file.externalRootDirectory,
+        cordova.file.externalDataDirectory,
+        cordova.file.documentsDirectory,
+        cordova.file.dataDirectory,
+        cordova.file.filesDirectory
+      ].filter(Boolean);
 
-      try {
-        const dirEntry = await new Promise((resolve, reject) => {
-          window.resolveLocalFileSystemURL(savePath, resolve, reject);
-        });
-        const fileEntry = await new Promise((resolve, reject) => {
-          dirEntry.getFile(fileName, { create: true, exclusive: false }, resolve, reject);
-        });
-        const writer = await new Promise((resolve, reject) => {
-          fileEntry.createWriter(resolve, reject);
-        });
-        const blob = new Blob([jsonStr], { type: 'application/json' });
-        writer.write(blob);
-        await new Promise((resolve, reject) => {
-          writer.onwriteend = resolve;
-          writer.onerror = reject;
-        });
-        
-        const fullPath = savePath + fileName;
-        showToast('✅ 导出成功！文件保存在: ' + fullPath);
-        console.log('导出成功，文件路径:', fullPath);
-        return;
-      } catch (e) {
-        console.warn('Cordova保存失败，使用降级方案:', e);
+      for (const savePath of possiblePaths) {
+        try {
+          const dirEntry = await new Promise((resolve, reject) => {
+            window.resolveLocalFileSystemURL(savePath, resolve, reject);
+          });
+          const fileEntry = await new Promise((resolve, reject) => {
+            dirEntry.getFile(fileName, { create: true, exclusive: false }, resolve, reject);
+          });
+          const writer = await new Promise((resolve, reject) => {
+            fileEntry.createWriter(resolve, reject);
+          });
+          const blob = new Blob([jsonStr], { type: 'application/json' });
+          writer.write(blob);
+          await new Promise((resolve, reject) => {
+            writer.onwriteend = resolve;
+            writer.onerror = reject;
+          });
+          const fullPath = savePath + fileName;
+          showToast('导出成功！保存在: ' + fullPath);
+          saved = true;
+          break;
+        } catch (e) {
+          console.warn('保存路径失败，尝试下一个:', savePath, e);
+        }
       }
     }
 
-    // 降级方案
-    const blob = new Blob([jsonStr], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = fileName;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    setTimeout(() => URL.revokeObjectURL(url), 5000);
-    showToast('✅ 导出成功！文件在下载文件夹');
+    // 降级方案：浏览器下载
+    if (!saved) {
+      const blob = new Blob([jsonStr], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+      showToast('导出成功！文件已保存');
+    }
 
   } catch (e) {
     console.error('导出失败:', e);
-    showToast('导出失败：' + e.message);
+    showToast('导出失败：' + (e.message || e));
   }
 });
 
@@ -2190,13 +2341,15 @@ document.getElementById('importInput').addEventListener('change', async function
       return;
     }
 
+    // 统计要导入的内容
     let msg = '将导入以下数据：\n';
-    if (data.tracks) msg += `• ${data.tracks.length} 首曲目\n`;
-    if (data.categories) msg += `• ${data.categories.length} 个分类\n`;
+    if (data.tracks) msg += '• ' + data.tracks.length + ' 首曲目\n';
+    if (data.categories) msg += '• ' + data.categories.length + ' 个分类\n';
     if (data.settings) {
-      if (data.settings.bgImages && data.settings.bgImages.length > 0) msg += `• ${data.settings.bgImages.length} 张背景图片\n`;
-      if (data.settings.recordImages && data.settings.recordImages.length > 0) msg += `• ${data.settings.recordImages.length} 张唱片图片\n`;
-      if (data.settings.labelImages && data.settings.labelImages.length > 0) msg += `• ${data.settings.labelImages.length} 张标签图片\n`;
+      if (data.settings.bgImages && data.settings.bgImages.length > 0) msg += '• ' + data.settings.bgImages.length + ' 张背景图片\n';
+      if (data.settings.recordImages && data.settings.recordImages.length > 0) msg += '• ' + data.settings.recordImages.length + ' 张唱片图片\n';
+      if (data.settings.labelImages && data.settings.labelImages.length > 0) msg += '• ' + data.settings.labelImages.length + ' 张标签图片\n';
+      if (data.settings.bgColor) msg += '• 颜色/主题设置\n';
     }
     msg += '\n⚠️ 这将替换当前所有数据，确定继续吗？';
 
@@ -2210,27 +2363,58 @@ document.getElementById('importInput').addEventListener('change', async function
     });
     if (!confirmed) return;
 
+    // 暂停播放
     pause();
-    currentMedia.src = '';
+    if (currentMedia) {
+      try { currentMedia.pause(); } catch(e) {}
+      currentMedia.src = '';
+      try { currentMedia.load(); } catch(e) {}
+    }
+
+    // 释放旧的 blob URL，防止内存泄漏
+    function revokeOldUrls(list) {
+      if (!list) return;
+      for (const item of list) {
+        if (typeof item === 'string' && item.startsWith('blob:')) {
+          try { URL.revokeObjectURL(item); } catch(e) {}
+        } else if (typeof item === 'object' && item !== null && item.url && typeof item.url === 'string' && item.url.startsWith('blob:')) {
+          try { URL.revokeObjectURL(item.url); } catch(e) {}
+        }
+      }
+    }
+    revokeOldUrls(tracks.map(t => t.src));
+    revokeOldUrls(settings.bgImages);
+    revokeOldUrls(settings.recordImages);
+    revokeOldUrls(settings.labelImages);
+
+    // 等待 IndexedDB 打开
+    await openDB();
 
     // 恢复 tracks
-    if (data.tracks && data.tracks.length > 0) {
-      const newTracks = [];
-      for (const t of data.tracks) {
-        let src = t.src || '';
+    const newTracks = [];
+    if (data.tracks && Array.isArray(data.tracks)) {
+      for (let i = 0; i < data.tracks.length; i++) {
+        const t = data.tracks[i];
+        let src = '';
         let fileKey = null;
 
         if (t.srcData && t.srcData.startsWith('data:')) {
-          const key = 'audio-import-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
-          const blob = await base64ToBlobAndStore(t.srcData, key);
-          if (blob) {
-            src = URL.createObjectURL(blob);
-            fileKey = key;
+          // 从 base64 还原音频文件
+          const restored = await base64ToBlobStoreAndUrl(t.srcData, (t.type === 'video' ? 'video-imp' : 'audio-imp'));
+          if (restored) {
+            src = restored.url;
+            fileKey = restored.fileKey;
           }
+        } else if (t.src && (t.src.startsWith('http:') || t.src.startsWith('https:') || t.src.startsWith('file:'))) {
+          // 远程URL直接保留
+          src = t.src;
+        } else if (t.src && t.src.startsWith('blob:')) {
+          // 旧格式 blob URL（导入数据中不应出现，但做兼容）
+          src = t.src;
         }
 
         newTracks.push({
-          id: t.id || nextTrackId++,
+          id: t.id != null ? t.id : nextTrackId++,
           name: t.name || '未命名',
           src: src,
           type: t.type || 'audio',
@@ -2238,22 +2422,50 @@ document.getElementById('importInput').addEventListener('change', async function
           _fileKey: fileKey
         });
       }
-      tracks = newTracks;
-      nextTrackId = tracks.length;
     }
+    tracks = newTracks;
 
     // 恢复 categories
     if (data.categories && Array.isArray(data.categories) && data.categories.length > 0) {
+      // 确保有默认分类
       const hasDefault = data.categories.some(c => c.id === 'cat-0');
-      if (!hasDefault) data.categories.unshift({ id: 'cat-0', name: '默认' });
-      categories = data.categories;
-      nextCategoryId = Math.max(1, ...categories.map((c) => {
-        const match = c.id && c.id.match(/cat-(\d+)/);
-        return match ? parseInt(match[1]) : 0;
-      })) + 1;
+      const newCats = JSON.parse(JSON.stringify(data.categories));
+      if (!hasDefault) {
+        newCats.unshift({ id: 'cat-0', name: '默认' });
+      }
+      categories = newCats;
+      // 计算 nextCategoryId
+      let maxCatId = 0;
+      for (const c of categories) {
+        if (c.id) {
+          const m = c.id.match(/cat-(\d+)/);
+          if (m) maxCatId = Math.max(maxCatId, parseInt(m[1]));
+        }
+      }
+      nextCategoryId = maxCatId + 1;
+    } else {
+      categories = [{ id: 'cat-0', name: '默认' }];
+      nextCategoryId = 1;
     }
 
     // 恢复 settings
+    // 先重置为默认值
+    settings.bgColor = '#0a0a0a';
+    settings.bgOpacity = 1.0;
+    settings.recordColor = '#030303';
+    settings.recordOpacity = 1.0;
+    settings.labelColor = '#c0392b';
+    settings.labelOpacity = 1.0;
+    settings.bgImages = [];
+    settings.bgImageIndex = -1;
+    settings.bgOpacityImage = 0.55;
+    settings.recordImages = [];
+    settings.recordImageIndex = -1;
+    settings.recordOpacityImage = 1.0;
+    settings.labelImages = [];
+    settings.labelImageIndex = -1;
+    settings.labelOpacityImage = 1.0;
+
     if (data.settings) {
       const s = data.settings;
       if (s.bgColor) settings.bgColor = s.bgColor;
@@ -2266,53 +2478,109 @@ document.getElementById('importInput').addEventListener('change', async function
       if (s.recordOpacityImage !== undefined) settings.recordOpacityImage = s.recordOpacityImage;
       if (s.labelOpacityImage !== undefined) settings.labelOpacityImage = s.labelOpacityImage;
 
-      async function restoreImages(imgList) {
+      // 恢复图片
+      async function restoreImages(imgList, prefix) {
         const result = [];
-        for (const img of imgList || []) {
+        if (!imgList || !Array.isArray(imgList)) return result;
+        for (const img of imgList) {
+          if (!img) continue;
           if (img.srcData && img.srcData.startsWith('data:')) {
-            const key = 'img-import-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
-            const blob = await base64ToBlobAndStore(img.srcData, key);
-            if (blob) {
-              result.push({ url: URL.createObjectURL(blob), _fileKey: key });
+            // 从 base64 还原图片
+            const restored = await base64ToBlobStoreAndUrl(img.srcData, prefix);
+            if (restored) {
+              result.push({ url: restored.url, _fileKey: restored.fileKey });
             }
-          } else if (img.src) {
-            result.push(img.src);
+          } else if (img.src && typeof img.src === 'string') {
+            if (img.src.startsWith('data:')) {
+              // 也可能直接是 data URL
+              const restored = await base64ToBlobStoreAndUrl(img.src, prefix);
+              if (restored) {
+                result.push({ url: restored.url, _fileKey: restored.fileKey });
+              }
+            } else if (!img.src.startsWith('blob:') && !img.src.startsWith('idb:')) {
+              // 远程URL或其他有效URL
+              result.push(img.src);
+            }
           }
         }
         return result;
       }
 
-      if (s.bgImages) settings.bgImages = await restoreImages(s.bgImages);
-      if (s.recordImages) settings.recordImages = await restoreImages(s.recordImages);
-      if (s.labelImages) settings.labelImages = await restoreImages(s.labelImages);
+      settings.bgImages = await restoreImages(s.bgImages, 'img-bg-imp');
+      settings.recordImages = await restoreImages(s.recordImages, 'img-rec-imp');
+      settings.labelImages = await restoreImages(s.labelImages, 'img-lbl-imp');
 
-      if (s.bgImageIndex !== undefined && s.bgImageIndex < settings.bgImages.length) settings.bgImageIndex = s.bgImageIndex;
-      else settings.bgImageIndex = settings.bgImages.length - 1;
-      if (s.recordImageIndex !== undefined && s.recordImageIndex < settings.recordImages.length) settings.recordImageIndex = s.recordImageIndex;
-      else settings.recordImageIndex = settings.recordImages.length - 1;
-      if (s.labelImageIndex !== undefined && s.labelImageIndex < settings.labelImages.length) settings.labelImageIndex = s.labelImageIndex;
-      else settings.labelImageIndex = settings.labelImages.length - 1;
+      // 恢复图片选中索引
+      if (s.bgImageIndex !== undefined) {
+        settings.bgImageIndex = (s.bgImageIndex >= 0 && s.bgImageIndex < settings.bgImages.length) ? s.bgImageIndex : -1;
+      }
+      if (s.recordImageIndex !== undefined) {
+        settings.recordImageIndex = (s.recordImageIndex >= 0 && s.recordImageIndex < settings.recordImages.length) ? s.recordImageIndex : -1;
+      }
+      if (s.labelImageIndex !== undefined) {
+        settings.labelImageIndex = (s.labelImageIndex >= 0 && s.labelImageIndex < settings.labelImages.length) ? s.labelImageIndex : -1;
+      }
     }
 
-    // 恢复状态
-    if (data.currentCategoryId) currentCategoryId = data.currentCategoryId;
+    // 恢复播放状态
+    if (data.currentCategoryId && categories.some(c => c.id === data.currentCategoryId)) {
+      currentCategoryId = data.currentCategoryId;
+    } else {
+      currentCategoryId = 'cat-0';
+    }
     if (data.playMode) playMode = data.playMode;
-    if (data.nextTrackId) nextTrackId = data.nextTrackId;
-    if (data.nextCategoryId) nextCategoryId = data.nextCategoryId;
-    if (data.currentIndex !== undefined && data.currentIndex < tracks.length) {
-      currentIndex = data.currentIndex;
+    if (data.nextTrackId && typeof data.nextTrackId === 'number' && data.nextTrackId > tracks.length) {
+      nextTrackId = data.nextTrackId;
+    } else {
+      // 基于现有最大ID计算
+      let maxId = 0;
+      for (const t of tracks) {
+        if (t.id && typeof t.id === 'number' && t.id > maxId) maxId = t.id;
+      }
+      nextTrackId = maxId + 1;
     }
 
+    // 恢复当前曲目索引
+    if (data.currentIndex !== undefined && data.currentIndex >= 0 && data.currentIndex < tracks.length) {
+      currentIndex = data.currentIndex;
+    } else {
+      currentIndex = 0;
+    }
+
+    // 停止之前的播放状态
+    isPlaying = false;
+
+    // 应用所有设置并刷新界面
     applySettings();
     renderCategoryBar();
+    renderSettingsColors();
+    // 更新播放模式指示器
+    if (playMode === 'shuffle') {
+      modeText.textContent = '随机播放';
+      modeDot1.classList.add('active');
+      modeDot2.classList.add('active');
+    } else {
+      modeText.textContent = '顺序播放';
+      modeDot1.classList.remove('active');
+      modeDot2.classList.remove('active');
+    }
+
+    // 加载当前曲目（不自动播放）
     if (tracks.length > 0) {
-      loadTrack(currentIndex < tracks.length ? currentIndex : 0);
+      loadTrack(currentIndex);
     } else {
       labelText.textContent = '音轨';
+      currentIndex = 0;
     }
     updateTrackList();
+
+    // 保存到持久化存储
     saveAllData();
-    showToast(`✅ 导入成功！共 ${tracks.length} 首曲目，${categories.length} 个分类`);
+
+    // 提示成功
+    let successMsg = '导入成功！共 ' + tracks.length + ' 首曲目';
+    if (categories.length > 1) successMsg += '，' + categories.length + ' 个分类';
+    showToast(successMsg);
 
   } catch (err) {
     console.error('导入失败:', err);
